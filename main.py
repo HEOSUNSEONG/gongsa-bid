@@ -1,547 +1,1176 @@
 import os
+import re
+import html
+import json
 import requests
 from datetime import datetime, timedelta
-from urllib.parse import unquote, quote
-from html import escape
+from urllib.parse import quote
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Query
+from fastapi.responses import HTMLResponse, JSONResponse
 
-app = FastAPI()
+app = FastAPI(title="gongsa-bid", version="region-full-1.0.0")
 
+
+# =========================================================
+# 기본 설정
+# =========================================================
+
+DATA_GO_KR_SERVICE_KEY = os.getenv("DATA_GO_KR_SERVICE_KEY", "").strip()
+
+G2B_CONSTRUCTION_API_URL = (
+    "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoCnstwk"
+)
 
 SONGWON_KEYWORDS = [
     "포장", "배수", "배수로", "상하수도", "관로",
     "도로", "하천", "소하천", "옹벽", "측구",
-    "맨홀", "농로", "재해복구", "정비", "보수"
+    "맨홀", "농로", "재해복구", "정비", "보수",
 ]
 
+# 화면에 표시할 전체 지역 버튼
+REGION_BUTTONS = [
+    "전체",
+    "전국",
+    "서울",
+    "경기",
+    "인천",
+    "부산",
+    "대구",
+    "광주",
+    "대전",
+    "울산",
+    "세종",
+    "강원",
+    "충북",
+    "충남",
+    "전북",
+    "전남",
+    "경북",
+    "경남",
+    "제주",
+    "수도권",
+    "충청권",
+    "전라권",
+    "경상권",
+]
 
-CATEGORIES = {
-    "all": {
-        "label": "전체보기",
-        "keywords": []
-    },
-    "pavement": {
-        "label": "포장/도로",
-        "keywords": ["포장", "도로", "농로"]
-    },
-    "water": {
-        "label": "상하수도/관로",
-        "keywords": ["상하수도", "관로"]
-    },
-    "drain": {
-        "label": "배수/측구",
-        "keywords": ["배수", "배수로", "측구"]
-    },
-    "river": {
-        "label": "하천/재해복구",
-        "keywords": ["하천", "소하천", "재해복구"]
-    },
-    "structure": {
-        "label": "옹벽/맨홀",
-        "keywords": ["옹벽", "맨홀"]
-    },
-    "repair": {
-        "label": "정비/보수",
-        "keywords": ["정비", "보수"]
-    },
-    "etc": {
-        "label": "기타",
-        "keywords": []
-    }
+# 지역 필터용 키워드
+# 지금 단계에서는 공고명/기관명/참가가능지역/제한지역 등에 들어있는 글자를 기준으로 필터합니다.
+# 나중에 "참가가능지역조회 API"를 붙이면 더 정확하게 만들 수 있습니다.
+REGION_KEYWORDS = {
+    "전국": [
+        "전국", "지역제한없음", "지역 제한 없음", "전 지역", "전지역",
+        "제한없음", "제한 없음",
+    ],
+    "서울": ["서울", "서울특별시"],
+    "경기": ["경기", "경기도"],
+    "인천": ["인천", "인천광역시"],
+    "부산": ["부산", "부산광역시"],
+    "대구": ["대구", "대구광역시"],
+    "광주": ["광주", "광주광역시"],
+    "대전": ["대전", "대전광역시"],
+    "울산": ["울산", "울산광역시"],
+    "세종": ["세종", "세종특별자치시"],
+    "강원": ["강원", "강원도", "강원특별자치도"],
+    "충북": ["충북", "충청북도"],
+    "충남": ["충남", "충청남도"],
+    "전북": ["전북", "전라북도", "전북특별자치도"],
+    "전남": ["전남", "전라남도"],
+    "경북": ["경북", "경상북도"],
+    "경남": ["경남", "경상남도", "김해", "김해시"],
+    "제주": ["제주", "제주도", "제주특별자치도"],
+
+    # 묶음 지역
+    "수도권": ["서울", "서울특별시", "경기", "경기도", "인천", "인천광역시"],
+    "충청권": [
+        "충북", "충청북도",
+        "충남", "충청남도",
+        "대전", "대전광역시",
+        "세종", "세종특별자치시",
+    ],
+    "전라권": [
+        "전북", "전라북도", "전북특별자치도",
+        "전남", "전라남도",
+        "광주", "광주광역시",
+    ],
+    "경상권": [
+        "경북", "경상북도",
+        "경남", "경상남도",
+        "부산", "부산광역시",
+        "대구", "대구광역시",
+        "울산", "울산광역시",
+    ],
+}
+
+CATEGORY_KEYWORDS = {
+    "포장": ["포장", "아스콘", "아스팔트", "콘크리트포장"],
+    "배수/측구": ["배수", "배수로", "측구", "수로", "우수", "집수정"],
+    "상하수도/관로": ["상하수도", "상수도", "하수도", "관로", "관거", "오수", "맨홀"],
+    "도로/농로": ["도로", "농로", "차도", "보도", "인도"],
+    "하천/소하천": ["하천", "소하천", "구거", "제방"],
+    "옹벽/구조물": ["옹벽", "석축", "블록", "구조물"],
+    "재해복구/정비/보수": ["재해복구", "복구", "정비", "보수", "유지보수"],
 }
 
 
-def is_closed(close_date: str):
-    if not close_date:
-        return False
+# =========================================================
+# 공통 함수
+# =========================================================
 
-    try:
-        close_dt = datetime.strptime(close_date, "%Y-%m-%d %H:%M:%S")
-        return close_dt < datetime.now()
-    except Exception:
-        return False
-
-
-def get_dday_text(close_date: str):
-    if not close_date:
-        return "마감일 정보 없음"
-
-    try:
-        close_dt = datetime.strptime(close_date, "%Y-%m-%d %H:%M:%S")
-        today = datetime.now().date()
-        close_day = close_dt.date()
-        days_left = (close_day - today).days
-
-        if days_left < 0:
-            return "마감"
-        elif days_left == 0:
-            return "오늘 마감"
-        elif days_left == 1:
-            return "내일 마감"
-        else:
-            return f"D-{days_left}"
-    except Exception:
-        return "마감일 확인 필요"
+def h(value) -> str:
+    if value is None:
+        return ""
+    return html.escape(str(value), quote=True)
 
 
-def classify_bid(title: str, search_keyword: str):
-    text = f"{title or ''} {search_keyword or ''}"
+def today_yyyymmddhhmm() -> str:
+    return datetime.now().strftime("%Y%m%d%H%M")
 
-    for category_key, category_info in CATEGORIES.items():
-        if category_key in ["all", "etc"]:
-            continue
 
-        for keyword in category_info["keywords"]:
+def future_yyyymmddhhmm(days: int = 30) -> str:
+    return (datetime.now() + timedelta(days=days)).strftime("%Y%m%d%H%M")
+
+
+def parse_date(value):
+    if not value:
+        return None
+
+    text = str(value).strip()
+
+    patterns = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y/%m/%d %H:%M:%S",
+        "%Y/%m/%d %H:%M",
+        "%Y%m%d%H%M%S",
+        "%Y%m%d%H%M",
+        "%Y%m%d",
+    ]
+
+    for pattern in patterns:
+        try:
+            return datetime.strptime(text, pattern)
+        except Exception:
+            pass
+
+    only_numbers = re.sub(r"[^0-9]", "", text)
+
+    if len(only_numbers) >= 14:
+        try:
+            return datetime.strptime(only_numbers[:14], "%Y%m%d%H%M%S")
+        except Exception:
+            pass
+
+    if len(only_numbers) >= 12:
+        try:
+            return datetime.strptime(only_numbers[:12], "%Y%m%d%H%M")
+        except Exception:
+            pass
+
+    if len(only_numbers) >= 8:
+        try:
+            return datetime.strptime(only_numbers[:8], "%Y%m%d")
+        except Exception:
+            pass
+
+    return None
+
+
+def get_first(item: dict, keys: list, default: str = "") -> str:
+    for key in keys:
+        value = item.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return default
+
+
+def get_deadline(item: dict) -> str:
+    return get_first(
+        item,
+        [
+            "bidClseDt",
+            "bidClseDate",
+            "bidClseTm",
+            "opengDt",
+            "rbidOpengDt",
+        ],
+    )
+
+
+def get_bid_no(item: dict) -> str:
+    return get_first(item, ["bidNtceNo", "bidno", "bidNo", "공고번호"])
+
+
+def get_bid_ord(item: dict) -> str:
+    return get_first(item, ["bidNtceOrd", "bidseq", "bidSeq", "공고차수"], "00")
+
+
+def get_bid_name(item: dict) -> str:
+    return get_first(item, ["bidNtceNm", "bidNm", "공고명"], "제목 없음")
+
+
+def get_agency(item: dict) -> str:
+    return get_first(
+        item,
+        [
+            "dminsttNm",
+            "ntceInsttNm",
+            "orderInsttNm",
+            "realDmndInsttNm",
+            "수요기관",
+            "공고기관",
+        ],
+        "-",
+    )
+
+
+def get_region_text(item: dict) -> str:
+    return get_first(
+        item,
+        [
+            "prtcptPsblRgnNm",
+            "prtcptPsblRgn",
+            "bidPrtcptLmtRgnNm",
+            "rgnLmtNm",
+            "rgnLmt",
+            "cnstrtsiteRgnNm",
+            "공사지역",
+            "참가가능지역",
+            "지역제한",
+        ],
+        "",
+    )
+
+
+def make_search_text(item: dict) -> str:
+    parts = []
+
+    important_keys = [
+        "bidNtceNm",
+        "dminsttNm",
+        "ntceInsttNm",
+        "orderInsttNm",
+        "realDmndInsttNm",
+        "prtcptPsblRgnNm",
+        "prtcptPsblRgn",
+        "bidPrtcptLmtRgnNm",
+        "rgnLmtNm",
+        "rgnLmt",
+        "cnstrtsiteRgnNm",
+        "indstrytyNm",
+        "lcnsLmtNm",
+        "bidPrtcptLmtYn",
+    ]
+
+    for key in important_keys:
+        value = item.get(key)
+        if value:
+            parts.append(str(value))
+
+    # 그래도 못 잡는 경우를 위해 전체 값도 포함
+    for value in item.values():
+        if value:
+            parts.append(str(value))
+
+    return " ".join(parts)
+
+
+def match_region(item: dict, region: str) -> bool:
+    if not region or region == "전체":
+        return True
+
+    region = region.strip()
+    keywords = REGION_KEYWORDS.get(region)
+
+    if not keywords:
+        return True
+
+    text = make_search_text(item)
+
+    # 전국은 지역 정보가 비어 있는 공고도 일단 포함합니다.
+    # 나중에 참가가능지역 API를 붙이면 더 정확하게 바꿀 수 있습니다.
+    if region == "전국":
+        region_text = get_region_text(item)
+        if not region_text:
+            return True
+
+    return any(keyword in text for keyword in keywords)
+
+
+def infer_region_label(item: dict) -> str:
+    region_text = get_region_text(item)
+
+    if region_text:
+        return region_text
+
+    text = make_search_text(item)
+
+    found = []
+
+    for region in [
+        "서울", "경기", "인천", "부산", "대구", "광주", "대전", "울산",
+        "세종", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주",
+    ]:
+        for keyword in REGION_KEYWORDS.get(region, []):
             if keyword in text:
-                return category_key
+                found.append(region)
+                break
 
-    return "etc"
+    if found:
+        return ", ".join(dict.fromkeys(found))
+
+    return "지역정보 없음"
 
 
-def fetch_nara_bids(keyword: str = "포장", days: int = 30, rows: int = 30):
-    service_key = os.getenv("DATA_GO_KR_SERVICE_KEY", "").strip()
+def infer_category(item: dict) -> str:
+    text = make_search_text(item)
 
-    if not service_key:
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        if any(keyword in text for keyword in keywords):
+            return category
+
+    return "기타"
+
+
+def get_d_day(deadline_text: str) -> str:
+    deadline = parse_date(deadline_text)
+
+    if not deadline:
+        return "-"
+
+    now = datetime.now()
+    diff_days = (deadline.date() - now.date()).days
+
+    if deadline < now:
+        return "마감"
+
+    if diff_days == 0:
+        return "D-day"
+
+    return f"D-{diff_days}"
+
+
+def is_closed(item: dict) -> bool:
+    deadline_text = get_deadline(item)
+    deadline = parse_date(deadline_text)
+
+    if not deadline:
+        return False
+
+    return deadline < datetime.now()
+
+
+def make_g2b_url(item: dict) -> str:
+    direct_url = get_first(
+        item,
+        [
+            "bidNtceUrl",
+            "bidNtceDtlUrl",
+            "ntceUrl",
+            "bidUrl",
+        ],
+        "",
+    )
+
+    if direct_url.startswith("http"):
+        return direct_url
+
+    bid_no = get_bid_no(item)
+    bid_ord = get_bid_ord(item)
+
+    if not bid_no:
+        return "https://www.g2b.go.kr"
+
+    return (
+        "https://www.g2b.go.kr:8101/ep/tbid/tbidFwd.do"
+        f"?bidno={quote(bid_no)}&bidseq={quote(bid_ord)}"
+    )
+
+
+def normalize_api_items(data) -> list:
+    try:
+        response = data.get("response", {})
+        body = response.get("body", {})
+        items = body.get("items", [])
+
+        if isinstance(items, dict):
+            item = items.get("item", [])
+        else:
+            item = items
+
+        if isinstance(item, dict):
+            return [item]
+
+        if isinstance(item, list):
+            return [x for x in item if isinstance(x, dict)]
+
+    except Exception:
+        pass
+
+    return []
+
+
+def build_api_url(params: dict) -> str:
+    key = DATA_GO_KR_SERVICE_KEY
+
+    if not key:
+        return ""
+
+    # 서비스키가 이미 인코딩된 키면 그대로 사용
+    # 디코딩된 일반 키면 인코딩해서 사용
+    safe_key = key if "%" in key else quote(key, safe="")
+
+    query_parts = [f"serviceKey={safe_key}"]
+
+    for k, v in params.items():
+        if v is None or v == "":
+            continue
+        query_parts.append(f"{quote(str(k))}={quote(str(v))}")
+
+    return G2B_CONSTRUCTION_API_URL + "?" + "&".join(query_parts)
+
+
+def fetch_nara_bids(
+    keyword: str,
+    page_no: int = 1,
+    num_rows: int = 100,
+    days_forward: int = 30,
+) -> dict:
+    if not DATA_GO_KR_SERVICE_KEY:
         return {
-            "status": "error",
-            "message": "Render 환경변수 DATA_GO_KR_SERVICE_KEY가 없습니다.",
-            "keyword": keyword,
+            "ok": False,
+            "error": "Render 환경변수 DATA_GO_KR_SERVICE_KEY가 없습니다.",
+            "items": [],
             "total_count": 0,
-            "count": 0,
-            "bids": []
         }
 
-    service_key = unquote(service_key)
-
-    today = datetime.now()
-    start = today.strftime("%Y%m%d0000")
-    end = (today + timedelta(days=days)).strftime("%Y%m%d2359")
-
-    url = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoCnstwkPPSSrch"
-
     params = {
-        "serviceKey": service_key,
-        "pageNo": "1",
-        "numOfRows": str(rows),
-        "inqryDiv": "1",
-        "inqryBgnDt": start,
-        "inqryEndDt": end,
+        "type": "json",
+        "pageNo": page_no,
+        "numOfRows": num_rows,
+        "inqryDiv": 1,
+        "inqryBgnDt": today_yyyymmddhhmm(),
+        "inqryEndDt": future_yyyymmddhhmm(days_forward),
         "bidNtceNm": keyword,
-        "type": "json"
     }
 
-    response = requests.get(url, params=params, timeout=20)
-    data = response.json()
+    url = build_api_url(params)
 
-    body = data.get("response", {}).get("body", {})
-    items = body.get("items", [])
+    try:
+        res = requests.get(url, timeout=20)
+        text = res.text
 
-    if isinstance(items, dict):
-        items = [items]
+        try:
+            data = res.json()
+        except Exception:
+            return {
+                "ok": False,
+                "error": "API 응답이 JSON이 아닙니다.",
+                "status_code": res.status_code,
+                "preview": text[:500],
+                "items": [],
+                "total_count": 0,
+            }
 
-    bids = []
+        items = normalize_api_items(data)
 
-    for item in items:
-        title = item.get("bidNtceNm")
-        close_date = item.get("bidClseDt")
+        total_count = 0
 
-        if is_closed(close_date):
-            continue
+        try:
+            total_count = int(data.get("response", {}).get("body", {}).get("totalCount", 0))
+        except Exception:
+            total_count = len(items)
 
-        bid_no = item.get("bidNtceNo")
-        bid_ord = item.get("bidNtceOrd") or item.get("bidPbancOrd") or "000"
-        category_key = classify_bid(title, keyword)
+        return {
+            "ok": True,
+            "keyword": keyword,
+            "page_no": page_no,
+            "num_rows": num_rows,
+            "total_count": total_count,
+            "items": items,
+        }
 
-        bids.append({
-            "검색키워드": keyword,
-            "분류키": category_key,
-            "분류명": CATEGORIES.get(category_key, {}).get("label", "기타"),
-            "공고명": title,
-            "공고번호": bid_no,
-            "공고차수": bid_ord,
-            "발주기관": item.get("dminsttNm"),
-            "공고기관": item.get("ntceInsttNm"),
-            "마감일": close_date,
-            "나라장터링크": item.get("bidNtceDtlUrl")
-        })
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": str(e),
+            "items": [],
+            "total_count": 0,
+        }
+
+
+def simplify_bid(item: dict, keyword: str = "") -> dict:
+    deadline = get_deadline(item)
 
     return {
-        "status": "ok",
         "keyword": keyword,
-        "search_start": start,
-        "search_end": end,
-        "total_count": body.get("totalCount"),
-        "count": len(bids),
-        "bids": bids
+        "category": infer_category(item),
+        "region_label": infer_region_label(item),
+        "bid_no": get_bid_no(item),
+        "bid_ord": get_bid_ord(item),
+        "bid_name": get_bid_name(item),
+        "agency": get_agency(item),
+        "notice_date": get_first(item, ["bidNtceDt", "공고일시"], "-"),
+        "deadline": deadline or "-",
+        "d_day": get_d_day(deadline),
+        "g2b_url": make_g2b_url(item),
+        "raw": item,
     }
 
 
-def fetch_songwon_all_bids():
-    all_bids = []
-    seen = set()
-    keyword_summary = []
+def search_bids_by_keywords(
+    keywords: list,
+    region: str = "전체",
+    exclude_closed: bool = True,
+    days_forward: int = 30,
+    pages_per_keyword: int = 1,
+    num_rows: int = 100,
+) -> dict:
+    all_items = []
+    errors = []
 
-    for keyword in SONGWON_KEYWORDS:
-        try:
-            result = fetch_nara_bids(keyword=keyword, days=30, rows=30)
-            bids = result.get("bids", [])
+    for keyword in keywords:
+        for page_no in range(1, pages_per_keyword + 1):
+            result = fetch_nara_bids(
+                keyword=keyword,
+                page_no=page_no,
+                num_rows=num_rows,
+                days_forward=days_forward,
+            )
 
-            keyword_summary.append({
-                "keyword": keyword,
-                "count": len(bids)
-            })
+            if not result.get("ok"):
+                errors.append(
+                    {
+                        "keyword": keyword,
+                        "page_no": page_no,
+                        "error": result.get("error"),
+                        "preview": result.get("preview", ""),
+                    }
+                )
+                continue
 
-            for bid in bids:
-                bid_no = bid.get("공고번호") or ""
-                bid_ord = bid.get("공고차수") or ""
-                title = bid.get("공고명") or ""
-
-                unique_key = f"{bid_no}-{bid_ord}-{title}"
-
-                if unique_key in seen:
+            for item in result.get("items", []):
+                if exclude_closed and is_closed(item):
                     continue
 
-                seen.add(unique_key)
-                all_bids.append(bid)
+                if not match_region(item, region):
+                    continue
 
-        except Exception:
-            keyword_summary.append({
-                "keyword": keyword,
-                "count": 0
-            })
+                all_items.append(simplify_bid(item, keyword=keyword))
 
-    all_bids.sort(key=lambda x: x.get("마감일") or "")
+    # 중복 제거
+    deduped = []
+    seen = set()
+
+    for bid in all_items:
+        key = (
+            bid.get("bid_no") or "",
+            bid.get("bid_ord") or "",
+            bid.get("bid_name") or "",
+            bid.get("deadline") or "",
+        )
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        deduped.append(bid)
+
+    # 마감일 빠른 순 정렬
+    def sort_key(bid):
+        dt = parse_date(bid.get("deadline"))
+        if not dt:
+            return datetime.max
+        return dt
+
+    deduped.sort(key=sort_key)
 
     return {
         "status": "ok",
-        "company": "주식회사 송원건설",
-        "keywords": SONGWON_KEYWORDS,
-        "keyword_summary": keyword_summary,
-        "count": len(all_bids),
-        "bids": all_bids
+        "region": region,
+        "exclude_closed": exclude_closed,
+        "keywords": keywords,
+        "count": len(deduped),
+        "errors": errors,
+        "bids": deduped,
     }
 
 
-def filter_bids_by_category(bids, category: str):
-    if category == "all":
-        return bids
+# =========================================================
+# HTML 화면
+# =========================================================
 
-    if category == "etc":
-        return [bid for bid in bids if bid.get("분류키") == "etc"]
+def render_region_buttons(base_path: str, current_region: str, keyword: str = "") -> str:
+    buttons = []
 
-    return [bid for bid in bids if bid.get("분류키") == category]
+    for region in REGION_BUTTONS:
+        active = "active" if region == current_region else ""
 
+        href = f"{base_path}?region={quote(region)}"
 
-def count_by_category(bids):
-    counts = {}
+        if keyword:
+            href += f"&keyword={quote(keyword)}"
 
-    for category_key in CATEGORIES.keys():
-        if category_key == "all":
-            counts[category_key] = len(bids)
-        else:
-            counts[category_key] = 0
+        buttons.append(f'<a class="region-btn {active}" href="{href}">{h(region)}</a>')
 
-    for bid in bids:
-        category_key = bid.get("분류키") or "etc"
-
-        if category_key not in counts:
-            category_key = "etc"
-
-        counts[category_key] += 1
-
-    return counts
+    return "\n".join(buttons)
 
 
-def render_category_buttons(selected_category, counts):
-    buttons = ""
-
-    for category_key, category_info in CATEGORIES.items():
-        label = category_info["label"]
-        count = counts.get(category_key, 0)
-
-        if category_key == selected_category:
-            background = "#111827"
-        else:
-            background = "#2563eb"
-
-        buttons += f"""
-        <a href="/bids/songwon-page?category={category_key}"
-           style="display:inline-block; padding:10px 14px; margin:5px; background:{background}; color:white; text-decoration:none; border-radius:22px;">
-           {escape(label)} {count}건
-        </a>
-        """
-
-    return buttons
-
-
-def render_keyword_summary(summary):
-    summary_html = ""
-
-    for item in summary:
-        summary_html += f"""
-        <span style="display:inline-block; padding:6px 10px; margin:4px; background:#e5e7eb; border-radius:20px;">
-            {escape(str(item.get("keyword")))}: {item.get("count")}건
-        </span>
-        """
-
-    return summary_html
-
-
-def render_bid_cards(bids):
+def render_bid_table(bids: list) -> str:
     if not bids:
         return """
-        <div style="background:white; padding:20px; border-radius:12px;">
-            <p>검색된 진행중 공고가 없습니다.</p>
+        <div class="empty">
+            조건에 맞는 공고가 없습니다.<br>
+            다른 지역을 눌러보거나, 전체 버튼을 눌러보세요.
         </div>
         """
 
-    cards = ""
+    rows = []
 
-    for bid in bids:
-        title = escape(str(bid.get("공고명") or ""))
-        bid_no = escape(str(bid.get("공고번호") or ""))
-        agency = escape(str(bid.get("발주기관") or ""))
-        notice_agency = escape(str(bid.get("공고기관") or ""))
-        close_date = escape(str(bid.get("마감일") or ""))
-        dday_text = escape(get_dday_text(bid.get("마감일")))
-        keyword = escape(str(bid.get("검색키워드") or ""))
-        category_name = escape(str(bid.get("분류명") or "기타"))
-        link = bid.get("나라장터링크") or "#"
+    for idx, bid in enumerate(bids, start=1):
+        dday = bid.get("d_day", "-")
+        dday_class = "dday"
 
-        cards += f"""
-        <div style="background:white; padding:20px; margin-bottom:15px; border-radius:12px; border-left:8px solid #2563eb; box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-            <div style="margin-bottom:8px;">
-                <span style="font-size:14px; color:white; background:#2563eb; display:inline-block; padding:5px 10px; border-radius:20px;">
-                    {category_name}
-                </span>
-                <span style="font-size:14px; color:white; background:#6b7280; display:inline-block; padding:5px 10px; border-radius:20px;">
-                    검색키워드: {keyword}
-                </span>
-            </div>
+        if dday == "D-day":
+            dday_class += " today"
+        elif dday == "마감":
+            dday_class += " closed"
 
-            <h2 style="margin-top:8px;">{title}</h2>
-            <p><b>공고번호:</b> {bid_no}</p>
-            <p><b>발주기관:</b> {agency}</p>
-            <p><b>공고기관:</b> {notice_agency}</p>
-            <p><b>마감일:</b> {close_date}</p>
-            <p><b>남은기간:</b> <span style="color:#dc2626; font-weight:bold;">{dday_text}</span></p>
-            <p>
-                <a href="{link}" target="_blank"
-                   style="display:inline-block; padding:10px 14px; background:#111827; color:white; text-decoration:none; border-radius:8px;">
-                   나라장터 원문 보기
-                </a>
-            </p>
-        </div>
-        """
-
-    return cards
-
-
-@app.get("/", response_class=HTMLResponse)
-def home():
-    keyword_links = ""
-
-    for keyword in SONGWON_KEYWORDS:
-        encoded = quote(keyword)
-        keyword_links += f"""
-        <a href="/bids/nara-page?keyword={encoded}"
-           style="display:inline-block; padding:8px 12px; margin:4px; background:#2563eb; color:white; text-decoration:none; border-radius:20px;">
-           {escape(keyword)}
-        </a>
-        """
+        rows.append(
+            f"""
+            <tr>
+                <td class="num">{idx}</td>
+                <td><span class="{dday_class}">{h(dday)}</span></td>
+                <td class="title">
+                    <div class="bid-name">{h(bid.get("bid_name"))}</div>
+                    <div class="small">공고번호: {h(bid.get("bid_no"))} / 키워드: {h(bid.get("keyword"))}</div>
+                </td>
+                <td>{h(bid.get("category"))}</td>
+                <td>{h(bid.get("region_label"))}</td>
+                <td>{h(bid.get("agency"))}</td>
+                <td>{h(bid.get("deadline"))}</td>
+                <td>
+                    <a class="link-btn" href="{h(bid.get("g2b_url"))}" target="_blank" rel="noopener">
+                        원문 보기
+                    </a>
+                </td>
+            </tr>
+            """
+        )
 
     return f"""
-    <html>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>No</th>
+                    <th>D-day</th>
+                    <th>공고명</th>
+                    <th>분류</th>
+                    <th>지역</th>
+                    <th>기관</th>
+                    <th>마감일</th>
+                    <th>나라장터</th>
+                </tr>
+            </thead>
+            <tbody>
+                {''.join(rows)}
+            </tbody>
+        </table>
+    </div>
+    """
+
+
+def page_layout(title: str, subtitle: str, body: str) -> str:
+    return f"""
+    <!doctype html>
+    <html lang="ko">
     <head>
         <meta charset="utf-8">
-        <title>gongsa-bid</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>{h(title)}</title>
+        <style>
+            * {{
+                box-sizing: border-box;
+            }}
+
+            body {{
+                margin: 0;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", Arial, sans-serif;
+                background: #f5f6f8;
+                color: #202124;
+            }}
+
+            header {{
+                background: #123;
+                color: white;
+                padding: 26px 22px;
+            }}
+
+            header h1 {{
+                margin: 0 0 8px;
+                font-size: 26px;
+            }}
+
+            header p {{
+                margin: 0;
+                opacity: 0.9;
+                line-height: 1.5;
+            }}
+
+            main {{
+                max-width: 1500px;
+                margin: 0 auto;
+                padding: 20px;
+            }}
+
+            .card {{
+                background: white;
+                border-radius: 14px;
+                padding: 18px;
+                margin-bottom: 16px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+            }}
+
+            .menu {{
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                margin-top: 12px;
+            }}
+
+            .region-btn,
+            .top-btn,
+            .link-btn,
+            button {{
+                display: inline-block;
+                border: 1px solid #d0d7de;
+                background: #ffffff;
+                color: #123;
+                padding: 9px 12px;
+                border-radius: 999px;
+                text-decoration: none;
+                font-size: 14px;
+                cursor: pointer;
+            }}
+
+            .region-btn.active {{
+                background: #123;
+                color: white;
+                border-color: #123;
+                font-weight: 700;
+            }}
+
+            .top-btn {{
+                border-radius: 10px;
+                background: #eef4ff;
+            }}
+
+            .search-form {{
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+                margin-top: 12px;
+            }}
+
+            input {{
+                min-width: 260px;
+                flex: 1;
+                padding: 11px 12px;
+                border: 1px solid #d0d7de;
+                border-radius: 10px;
+                font-size: 15px;
+            }}
+
+            button {{
+                background: #123;
+                color: white;
+                border-color: #123;
+                border-radius: 10px;
+                padding: 11px 16px;
+            }}
+
+            .summary {{
+                display: flex;
+                gap: 10px;
+                flex-wrap: wrap;
+                align-items: center;
+            }}
+
+            .badge {{
+                background: #eef4ff;
+                color: #123;
+                border: 1px solid #d9e7ff;
+                border-radius: 999px;
+                padding: 8px 12px;
+                font-size: 14px;
+            }}
+
+            .table-wrap {{
+                width: 100%;
+                overflow-x: auto;
+            }}
+
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                min-width: 1100px;
+            }}
+
+            th,
+            td {{
+                border-bottom: 1px solid #eceff3;
+                padding: 12px 10px;
+                vertical-align: top;
+                text-align: left;
+                font-size: 14px;
+            }}
+
+            th {{
+                background: #f8fafc;
+                font-weight: 700;
+                position: sticky;
+                top: 0;
+            }}
+
+            .num {{
+                width: 55px;
+                color: #667085;
+            }}
+
+            .title {{
+                min-width: 330px;
+            }}
+
+            .bid-name {{
+                font-weight: 700;
+                margin-bottom: 5px;
+                line-height: 1.35;
+            }}
+
+            .small {{
+                color: #667085;
+                font-size: 12px;
+                line-height: 1.4;
+            }}
+
+            .dday {{
+                display: inline-block;
+                min-width: 56px;
+                text-align: center;
+                padding: 6px 8px;
+                border-radius: 999px;
+                background: #fff4e5;
+                color: #9a5b00;
+                font-weight: 700;
+            }}
+
+            .dday.today {{
+                background: #ffe8e8;
+                color: #b42318;
+            }}
+
+            .dday.closed {{
+                background: #e5e7eb;
+                color: #6b7280;
+            }}
+
+            .link-btn {{
+                white-space: nowrap;
+                border-radius: 8px;
+                background: #f6f8fa;
+            }}
+
+            .empty {{
+                padding: 30px;
+                text-align: center;
+                background: #f8fafc;
+                border: 1px dashed #cbd5e1;
+                border-radius: 12px;
+                color: #475467;
+                line-height: 1.7;
+            }}
+
+            .notice {{
+                line-height: 1.7;
+                color: #475467;
+                font-size: 14px;
+            }}
+
+            .error {{
+                background: #fff1f3;
+                border: 1px solid #ffd6de;
+                color: #b42318;
+                padding: 12px;
+                border-radius: 10px;
+                white-space: pre-wrap;
+            }}
+        </style>
     </head>
-    <body style="font-family:Arial; padding:30px; background:#f4f6f8;">
-        <div style="max-width:1000px; margin:auto; background:white; padding:30px; border-radius:14px;">
-            <h1>gongsa-bid</h1>
-            <h2>건설회사 전용 나라장터 공고 확인 웹사이트</h2>
+    <body>
+        <header>
+            <h1>{h(title)}</h1>
+            <p>{h(subtitle)}</p>
+        </header>
 
-            <p>현재는 송원건설 주력 키워드로 나라장터 공고를 검색해서 보여주는 테스트 단계입니다.</p>
-            <p>추천등급 없이, 검색된 진행중 공고를 분류별로 표시합니다.</p>
-
-            <hr>
-
-            <h3>회사 정보</h3>
-            <p><b>회사명:</b> 주식회사 송원건설</p>
-            <p><b>주소:</b> 경상남도 김해시 삼문로19, 1205호</p>
-            <p><b>전화:</b> 055-339-4763</p>
-            <p><b>팩스:</b> 055-339-4764</p>
-            <p><b>이메일:</b> songwon4763@naver.com</p>
-
-            <hr>
-
-            <h3>송원건설 주력 키워드 개별 검색</h3>
-            <p>아래 키워드를 누르면 해당 키워드 공고만 검색됩니다.</p>
-            <div>
-                {keyword_links}
-            </div>
-
-            <hr>
-
-            <h3>분류별 전체 검색</h3>
-            <p>송원건설 주력 키워드 15개를 한 번에 검색하고, 면허/공종 분류별로 나눠서 보여줍니다.</p>
-            <p>
-                <a href="/bids/songwon-page"
-                   style="display:inline-block; padding:14px 18px; background:#111827; color:white; text-decoration:none; border-radius:10px;">
-                   송원건설 전체 공고 검색하기
-                </a>
-            </p>
-        </div>
+        <main>
+            {body}
+        </main>
     </body>
     </html>
     """
 
+
+# =========================================================
+# 라우트
+# =========================================================
 
 @app.get("/health")
 def health():
     return {
         "status": "ok",
-        "service": "gongsa-bid"
+        "service": "gongsa-bid",
+        "version": "region-full-1.0.0",
+        "has_DATA_GO_KR_SERVICE_KEY": bool(DATA_GO_KR_SERVICE_KEY),
     }
 
 
-@app.get("/bids/nara-test")
-def nara_test(keyword: str = "포장"):
-    try:
-        return fetch_nara_bids(keyword=keyword)
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": str(e),
-            "bids": []
-        }
+@app.get("/routes")
+def routes():
+    return {
+        "routes": [
+            "/",
+            "/health",
+            "/routes",
+            "/bids/nara?keyword=포장",
+            "/bids/nara-page?keyword=포장",
+            "/bids/songwon-test",
+            "/bids/songwon-page",
+            "/bids/songwon-page?region=서울",
+            "/bids/songwon-page?region=경기",
+            "/bids/songwon-page?region=충북",
+            "/bids/songwon-page?region=충남",
+            "/bids/songwon-page?region=충청권",
+            "/bids/songwon-page?region=경남",
+        ]
+    }
+
+
+@app.get("/", response_class=HTMLResponse)
+def home():
+    body = """
+    <div class="card">
+        <h2>공사입찰 공고 검색</h2>
+        <p class="notice">
+            송원건설 주력 키워드 15개로 나라장터 공사 공고를 검색합니다.<br>
+            이번 버전은 서울, 경기, 충청도 포함해서 지역별 버튼을 전체 확장했습니다.
+        </p>
+
+        <div class="menu">
+            <a class="top-btn" href="/bids/songwon-page">전체 공고 보기</a>
+            <a class="top-btn" href="/bids/songwon-page?region=서울">서울 공고 보기</a>
+            <a class="top-btn" href="/bids/songwon-page?region=경기">경기 공고 보기</a>
+            <a class="top-btn" href="/bids/songwon-page?region=충북">충북 공고 보기</a>
+            <a class="top-btn" href="/bids/songwon-page?region=충남">충남 공고 보기</a>
+            <a class="top-btn" href="/bids/songwon-page?region=충청권">충청권 공고 보기</a>
+            <a class="top-btn" href="/bids/songwon-page?region=경남">경남 공고 보기</a>
+            <a class="top-btn" href="/bids/songwon-test">JSON 테스트</a>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>송원건설 정보</h3>
+        <p class="notice">
+            회사명: 주식회사 송원건설<br>
+            주소: 경상남도 김해시 삼문로19, 1205호<br>
+            전화: 055-339-4763 / 팩스: 055-339-4764<br>
+            이메일: songwon4763@naver.com
+        </p>
+    </div>
+    """
+
+    return page_layout(
+        "gongsa-bid",
+        "건설회사 전용 나라장터 공고 웹플랫폼",
+        body,
+    )
+
+
+@app.get("/bids/nara")
+def nara_json(
+    keyword: str = Query("포장", description="검색 키워드"),
+    region: str = Query("전체", description="지역 필터"),
+    days_forward: int = Query(30, description="오늘부터 며칠 뒤까지 검색할지"),
+):
+    result = search_bids_by_keywords(
+        keywords=[keyword],
+        region=region,
+        exclude_closed=True,
+        days_forward=days_forward,
+        pages_per_keyword=1,
+        num_rows=100,
+    )
+
+    return JSONResponse(result)
 
 
 @app.get("/bids/nara-page", response_class=HTMLResponse)
-def nara_page(keyword: str = "포장"):
-    try:
-        result = fetch_nara_bids(keyword=keyword)
-    except Exception as e:
-        return f"""
-        <html>
-        <head><meta charset="utf-8"></head>
-        <body style="font-family:Arial; padding:30px;">
-            <h1>오류 발생</h1>
-            <p>{escape(str(e))}</p>
-            <p><a href="/">처음으로 돌아가기</a></p>
-        </body>
-        </html>
+def nara_page(
+    keyword: str = Query("포장"),
+    region: str = Query("전체"),
+    days_forward: int = Query(30),
+):
+    result = search_bids_by_keywords(
+        keywords=[keyword],
+        region=region,
+        exclude_closed=True,
+        days_forward=days_forward,
+        pages_per_keyword=1,
+        num_rows=100,
+    )
+
+    region_buttons = render_region_buttons("/bids/nara-page", region, keyword=keyword)
+
+    error_html = ""
+
+    if result.get("errors"):
+        error_html = f"""
+        <div class="card">
+            <div class="error">{h(json.dumps(result.get("errors"), ensure_ascii=False, indent=2))}</div>
+        </div>
         """
 
-    bids = result.get("bids", [])
-    cards = render_bid_cards(bids)
-
-    return f"""
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <title>{escape(keyword)} 공고 목록</title>
-    </head>
-    <body style="font-family:Arial; padding:30px; background:#f4f6f8;">
-        <div style="max-width:1000px; margin:auto;">
-            <h1>송원건설 나라장터 공고 목록</h1>
-            <h2>검색 키워드: {escape(keyword)}</h2>
-
-            <p>검색 기간: 오늘부터 30일</p>
-            <p>총 검색 수: {result.get("total_count")}</p>
-            <p>화면 표시 수: {result.get("count")}</p>
-
-            <hr>
-
-            {cards}
-
-            <p><a href="/">처음 화면으로 돌아가기</a></p>
+    body = f"""
+    <div class="card">
+        <div class="summary">
+            <span class="badge">검색어: {h(keyword)}</span>
+            <span class="badge">선택 지역: {h(region)}</span>
+            <span class="badge">공고 수: {h(result.get("count"))}개</span>
+            <a class="top-btn" href="/">첫 화면</a>
+            <a class="top-btn" href="/bids/songwon-page">송원 전체검색</a>
         </div>
-    </body>
-    </html>
+
+        <form class="search-form" action="/bids/nara-page" method="get">
+            <input type="text" name="keyword" value="{h(keyword)}" placeholder="공고명 검색 예: 포장, 배수로, 도로">
+            <input type="hidden" name="region" value="{h(region)}">
+            <button type="submit">검색</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h3>지역별 보기</h3>
+        <div class="menu">
+            {region_buttons}
+        </div>
+    </div>
+
+    {error_html}
+
+    <div class="card">
+        {render_bid_table(result.get("bids", []))}
+    </div>
     """
+
+    return page_layout(
+        f"개별 검색 - {keyword}",
+        f"지역: {region} / 마감 지난 공고 제외 / D-day 표시",
+        body,
+    )
 
 
 @app.get("/bids/songwon-test")
-def songwon_test():
-    try:
-        return fetch_songwon_all_bids()
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": str(e),
-            "bids": []
-        }
+def songwon_test(
+    region: str = Query("전체"),
+    days_forward: int = Query(30),
+):
+    return JSONResponse(
+        search_bids_by_keywords(
+            keywords=SONGWON_KEYWORDS,
+            region=region,
+            exclude_closed=True,
+            days_forward=days_forward,
+            pages_per_keyword=1,
+            num_rows=100,
+        )
+    )
 
 
 @app.get("/bids/songwon-page", response_class=HTMLResponse)
-def songwon_page(category: str = "all"):
-    if category not in CATEGORIES:
-        category = "all"
+def songwon_page(
+    region: str = Query("전체"),
+    keyword: str = Query("", description="비워두면 송원 주력 키워드 전체 검색"),
+    days_forward: int = Query(30),
+):
+    # 검색창에 키워드를 넣으면 그 키워드만 검색
+    # 비워두면 송원건설 주력 키워드 15개 전체 검색
+    keywords = [keyword.strip()] if keyword.strip() else SONGWON_KEYWORDS
 
-    try:
-        result = fetch_songwon_all_bids()
-    except Exception as e:
-        return f"""
-        <html>
-        <head><meta charset="utf-8"></head>
-        <body style="font-family:Arial; padding:30px;">
-            <h1>오류 발생</h1>
-            <p>{escape(str(e))}</p>
-            <p><a href="/">처음으로 돌아가기</a></p>
-        </body>
-        </html>
+    result = search_bids_by_keywords(
+        keywords=keywords,
+        region=region,
+        exclude_closed=True,
+        days_forward=days_forward,
+        pages_per_keyword=1,
+        num_rows=100,
+    )
+
+    region_buttons = render_region_buttons("/bids/songwon-page", region, keyword=keyword)
+
+    error_html = ""
+
+    if result.get("errors"):
+        error_html = f"""
+        <div class="card">
+            <h3>API 오류</h3>
+            <div class="error">{h(json.dumps(result.get("errors"), ensure_ascii=False, indent=2))}</div>
+        </div>
         """
 
-    all_bids = result.get("bids", [])
-    summary = result.get("keyword_summary", [])
-    counts = count_by_category(all_bids)
-    filtered_bids = filter_bids_by_category(all_bids, category)
+    keyword_label = keyword.strip() if keyword.strip() else "송원 주력 키워드 15개 전체"
 
-    selected_label = CATEGORIES.get(category, {}).get("label", "전체보기")
-
-    summary_html = render_keyword_summary(summary)
-    category_buttons = render_category_buttons(category, counts)
-    cards = render_bid_cards(filtered_bids)
-
-    return f"""
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <title>송원건설 전체 공고 검색</title>
-    </head>
-    <body style="font-family:Arial; padding:30px; background:#f4f6f8;">
-        <div style="max-width:1100px; margin:auto;">
-            <h1>송원건설 전체 공고 검색</h1>
-            <p>송원건설 주력 키워드 15개를 검색하고, 중복 공고는 제거했습니다.</p>
-            <p>마감일이 지난 공고는 화면에서 제외했습니다.</p>
-            <p>추천등급 없이, 면허/공종 분류별로 공고를 나누어 보여줍니다.</p>
-
-            <hr>
-
-            <h3>분류별 보기</h3>
-            <div>
-                {category_buttons}
-            </div>
-
-            <hr>
-
-            <h3>키워드별 검색 결과</h3>
-            <div>
-                {summary_html}
-            </div>
-
-            <hr>
-
-            <h2>{escape(selected_label)}: {len(filtered_bids)}건</h2>
-            <p>전체 진행중 공고 수: {result.get("count")}건</p>
-
-            {cards}
-
-            <p><a href="/">처음 화면으로 돌아가기</a></p>
+    body = f"""
+    <div class="card">
+        <div class="summary">
+            <span class="badge">검색 범위: {h(keyword_label)}</span>
+            <span class="badge">선택 지역: {h(region)}</span>
+            <span class="badge">공고 수: {h(result.get("count"))}개</span>
+            <span class="badge">마감 지난 공고 제외</span>
+            <a class="top-btn" href="/">첫 화면</a>
+            <a class="top-btn" href="/bids/songwon-test?region={quote(region)}" target="_blank">JSON 보기</a>
         </div>
-    </body>
-    </html>
+
+        <form class="search-form" action="/bids/songwon-page" method="get">
+            <input type="text" name="keyword" value="{h(keyword)}" placeholder="공고명 검색 예: 포장, 배수로, 도로 / 비우면 전체검색">
+            <input type="hidden" name="region" value="{h(region)}">
+            <button type="submit">공고명 검색</button>
+            <a class="top-btn" href="/bids/songwon-page?region={quote(region)}">검색 초기화</a>
+        </form>
+    </div>
+
+    <div class="card">
+        <h3>지역별 보기</h3>
+        <p class="notice">
+            전체 지역을 넣었습니다.<br>
+            서울, 경기, 인천, 부산, 대구, 광주, 대전, 울산, 세종, 강원,
+            충북, 충남, 전북, 전남, 경북, 경남, 제주까지 볼 수 있습니다.<br>
+            수도권, 충청권, 전라권, 경상권 묶음 버튼도 같이 넣었습니다.
+        </p>
+
+        <div class="menu">
+            {region_buttons}
+        </div>
+    </div>
+
+    {error_html}
+
+    <div class="card">
+        {render_bid_table(result.get("bids", []))}
+    </div>
     """
+
+    return page_layout(
+        "송원건설 전체 공고 검색",
+        "지역별 필터 전체 확장 버전",
+        body,
+    )
