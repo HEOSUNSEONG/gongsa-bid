@@ -11,7 +11,7 @@ from typing import List
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
-app = FastAPI(title="gongsa-bid", version="profile-clean-region-siping-fixed-1.0.0")
+app = FastAPI(title="gongsa-bid", version="my-bids-profile-match-1.0.0")
 
 
 DATA_GO_KR_SERVICE_KEY = os.getenv("DATA_GO_KR_SERVICE_KEY", "").strip()
@@ -743,6 +743,60 @@ def get_nationwide_reason(item: dict) -> str:
     return ""
 
 
+def region_aliases(region_value: str) -> list:
+    aliases = {
+        "서울특별시": ["서울", "서울특별시"],
+        "경기도": ["경기", "경기도"],
+        "인천광역시": ["인천", "인천광역시"],
+        "부산광역시": ["부산", "부산광역시"],
+        "대구광역시": ["대구", "대구광역시"],
+        "광주광역시": ["광주", "광주광역시"],
+        "대전광역시": ["대전", "대전광역시"],
+        "울산광역시": ["울산", "울산광역시"],
+        "세종특별자치시": ["세종", "세종특별자치시"],
+        "강원특별자치도": ["강원", "강원도", "강원특별자치도"],
+        "충청북도": ["충북", "충청북도"],
+        "충청남도": ["충남", "충청남도"],
+        "전북특별자치도": ["전북", "전라북도", "전북특별자치도"],
+        "전라남도": ["전남", "전라남도"],
+        "경상북도": ["경북", "경상북도"],
+        "경상남도": ["경남", "경상남도"],
+        "제주특별자치도": ["제주", "제주도", "제주특별자치도"],
+    }
+    return aliases.get(region_value, [region_value])
+
+
+def keywords_for_region(region: str) -> list:
+    if not region:
+        return []
+
+    region = region.strip()
+
+    if region in REGION_KEYWORDS:
+        return REGION_KEYWORDS.get(region, [])
+
+    if "/" in region:
+        sido, sigun = region.split("/", 1)
+
+        if sigun == "전체":
+            return region_aliases(sido)
+
+        # 김해시, 창녕군처럼 시·군을 선택한 경우에는
+        # 도 전체가 아니라 해당 시·군 이름 중심으로 검색합니다.
+        return [sigun]
+
+    old_map = {
+        "경남 전체": ["경남", "경상남도"],
+        "경북 전체": ["경북", "경상북도"],
+        "부산 전체": ["부산", "부산광역시"],
+        "울산 전체": ["울산", "울산광역시"],
+        "김해시": ["김해", "김해시"],
+        "창녕군": ["창녕", "창녕군"],
+    }
+
+    return old_map.get(region, [region])
+
+
 def match_region(item: dict, region: str) -> bool:
     if not region or region == "전체":
         return True
@@ -752,19 +806,9 @@ def match_region(item: dict, region: str) -> bool:
     if region == "전국":
         return bool(get_nationwide_reason(item))
 
-    keywords = REGION_KEYWORDS.get(region)
-
-    if not keywords:
-        if "/" in region:
-            sido, sigun = region.split("/", 1)
-            if sigun == "전체":
-                keywords = [sido, sido.replace("특별자치도", ""), sido.replace("광역시", ""), sido.replace("특별시", "")]
-            else:
-                keywords = [sido, sigun]
-        else:
-            keywords = [region]
-
+    keywords = keywords_for_region(region)
     text = make_search_text(item)
+
     return any(keyword in text for keyword in keywords if keyword)
 
 
@@ -1073,6 +1117,103 @@ def search_bids_by_keywords(
         "region": region,
         "exclude_closed": exclude_closed,
         "keywords": keywords,
+        "count": len(deduped),
+        "errors": errors,
+        "bids": deduped,
+    }
+
+
+def match_profile_regions(item: dict, profile_regions: list) -> bool:
+    if not profile_regions:
+        return True
+
+    for region in profile_regions:
+        if match_region(item, region):
+            return True
+
+    return False
+
+
+def get_profile_matched_regions(item: dict, profile_regions: list) -> list:
+    matched = []
+
+    for region in profile_regions or []:
+        if match_region(item, region):
+            matched.append(region_display_name(region))
+
+    return matched
+
+
+def search_bids_for_profile(
+    profile: dict,
+    exclude_closed: bool = True,
+    days_forward: int = 30,
+    pages_per_keyword: int = 1,
+    num_rows: int = 100,
+) -> dict:
+    keywords = split_keywords(profile.get("keyword_text", ""))
+    profile_regions = profile.get("possible_regions", [])
+
+    all_items = []
+    errors = []
+
+    for keyword in keywords:
+        for page_no in range(1, pages_per_keyword + 1):
+            result = fetch_nara_bids(keyword, page_no, num_rows, days_forward)
+
+            if not result.get("ok"):
+                errors.append({
+                    "keyword": keyword,
+                    "page_no": page_no,
+                    "error": result.get("error"),
+                    "preview": result.get("preview", ""),
+                })
+                continue
+
+            for item in result.get("items", []):
+                if exclude_closed and is_closed(item):
+                    continue
+
+                if not match_profile_regions(item, profile_regions):
+                    continue
+
+                bid = simplify_bid(item, keyword=keyword)
+                matched_regions = get_profile_matched_regions(item, profile_regions)
+                bid["profile_match_region_label"] = ", ".join(matched_regions) if matched_regions else "-"
+                all_items.append(bid)
+
+    deduped = []
+    seen = set()
+
+    for bid in all_items:
+        key = (
+            bid.get("bid_no") or "",
+            bid.get("bid_ord") or "",
+            bid.get("bid_name") or "",
+            bid.get("deadline") or "",
+        )
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        deduped.append(bid)
+
+    def sort_key(bid):
+        dt = parse_date(bid.get("deadline"))
+        if not dt:
+            return datetime.max
+        return dt
+
+    deduped.sort(key=sort_key)
+
+    return {
+        "status": "ok",
+        "mode": "profile",
+        "exclude_closed": exclude_closed,
+        "keywords": keywords,
+        "profile_regions": profile_regions,
+        "profile_regions_label": format_region_list(profile_regions),
         "count": len(deduped),
         "errors": errors,
         "bids": deduped,
@@ -1625,7 +1766,7 @@ def health():
     return {
         "status": "ok",
         "service": "gongsa-bid",
-        "version": "profile-clean-region-siping-fixed-1.0.0",
+        "version": "my-bids-profile-match-1.0.0",
         "has_DATA_GO_KR_SERVICE_KEY": bool(DATA_GO_KR_SERVICE_KEY),
     }
 
@@ -1643,6 +1784,7 @@ def routes():
             "/bids/nara-page?keyword=포장",
             "/bids/songwon-test",
             "/bids/songwon-page",
+            "/bids/my-page",
             "/bids/songwon-page?region=전국",
             "/bids/songwon-page?region=경남",
         ]
@@ -1662,6 +1804,7 @@ def home():
         </p>
 
         <div class="menu">
+            <a class="top-btn" href="/bids/my-page">내 회사 맞춤 공고</a>
             <a class="top-btn" href="/bids/songwon-page">전체 공고 보기</a>
             <a class="top-btn" href="/bids/songwon-page?region=전국">전국 공고 보기</a>
             <a class="top-btn" href="/bids/songwon-page?region=경남">경남 공고 보기</a>
@@ -1873,6 +2016,7 @@ def company_profile_save(
             <a class="top-btn" href="/">첫 화면</a>
             <a class="top-btn" href="/company/profile">다시 수정하기</a>
             <a class="top-btn" href="/company/profile-data" target="_blank">JSON 확인</a>
+            <a class="top-btn" href="/bids/my-page">내 회사 맞춤 공고</a>
             <a class="top-btn" href="/bids/songwon-page">공고 보기</a>
         </div>
     </div>
@@ -1955,6 +2099,76 @@ def songwon_test(
     return JSONResponse(search_bids_by_keywords(keywords, region, True, days_forward, 1, 100))
 
 
+
+@app.get("/bids/my-page", response_class=HTMLResponse)
+def my_bids_page(
+    days_forward: int = Query(30),
+):
+    profile = load_company_profile()
+    result = search_bids_for_profile(
+        profile=profile,
+        exclude_closed=True,
+        days_forward=days_forward,
+        pages_per_keyword=1,
+        num_rows=100,
+    )
+
+    error_html = ""
+    if result.get("errors"):
+        error_html = f"""
+        <div class="card">
+            <h3>API 오류</h3>
+            <div class="error">{h(json.dumps(result.get("errors"), ensure_ascii=False, indent=2))}</div>
+        </div>
+        """
+
+    selected_regions = result.get("profile_regions_label") or "선택 안 함"
+
+    body = f"""
+    <div class="card">
+        <div class="summary">
+            <span class="badge">내 회사 맞춤 공고</span>
+            <span class="badge">입찰 가능지역: {h(selected_regions)}</span>
+            <span class="badge">공고 수: {h(result.get("count"))}개</span>
+            <span class="badge">마감 지난 공고 제외</span>
+            <a class="top-btn" href="/">첫 화면</a>
+            <a class="top-btn" href="/company/profile">회사 프로필 수정</a>
+            <a class="top-btn" href="/bids/songwon-page">전체 공고 보기</a>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>맞춤 공고 기준</h3>
+        <p class="notice">
+            현재는 회사 프로필의 <strong>입찰 가능지역</strong>과 <strong>주력 키워드</strong>를 기준으로 공고를 걸러봅니다.<br>
+            예: 전국, 경상남도, 김해시, 창녕군을 저장하면 그 지역에 해당하는 공고를 함께 보여줍니다.<br>
+            다음 단계에서 보유 면허, 주력 공종, 시공능력평가액 기준까지 더 정확하게 연결할 예정입니다.
+        </p>
+
+        <div class="profile-box">
+            <strong>회사명:</strong> {h(profile.get("company_name"))}<br>
+            <strong>입찰 가능지역:</strong> {h(format_region_list(profile.get("possible_regions", [])))}<br>
+            <strong>시공능력평가액:</strong> {h(profile.get("siping_amount_text") or format_money(profile.get("siping_amount", 0)))}<br>
+            <strong>보유 면허:</strong> {h(", ".join(profile.get("licenses", [])) if profile.get("licenses") else "선택 안 함")}<br>
+            <strong>주력 공종:</strong> {h(", ".join(profile.get("work_types", [])) if profile.get("work_types") else "선택 안 함")}<br>
+            <strong>주력 키워드:</strong> {h(profile.get("keyword_text"))}
+        </div>
+    </div>
+
+    {error_html}
+
+    <div class="card">
+        {render_bid_table(result.get("bids", []))}
+    </div>
+    """
+
+    return page_layout(
+        "내 회사 맞춤 공고",
+        "회사 프로필의 입찰 가능지역과 키워드를 기준으로 공고를 보여줍니다",
+        body,
+    )
+
+
 @app.get("/bids/songwon-page", response_class=HTMLResponse)
 def songwon_page(
     region: str = Query("전체"),
@@ -1992,6 +2206,7 @@ def songwon_page(
             <span class="badge">마감 지난 공고 제외</span>
             <a class="top-btn" href="/">첫 화면</a>
             <a class="top-btn" href="/company/profile">회사 프로필</a>
+            <a class="top-btn" href="/bids/my-page">내 회사 맞춤 공고</a>
             <a class="top-btn" href="/bids/songwon-test?region={quote(region)}" target="_blank">JSON 보기</a>
         </div>
 
