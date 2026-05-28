@@ -11,7 +11,7 @@ from typing import List
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
-app = FastAPI(title="gongsa-bid", version="profile-worktype-siping-1.0.0")
+app = FastAPI(title="gongsa-bid", version="profile-clean-region-ui-1.0.0")
 
 DATA_GO_KR_SERVICE_KEY = os.getenv("DATA_GO_KR_SERVICE_KEY", "").strip()
 G2B_CONSTRUCTION_API_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoCnstwk"
@@ -24,118 +24,265 @@ REGION_BUTTONS = [
     "전체", "전국", "서울", "경기", "인천", "부산", "대구", "광주", "대전", "울산", "세종", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주", "수도권", "충청권", "전라권", "경상권"
 ]
 
-PROFILE_REGION_OPTIONS = [
-    "전국",
-
-    # 시·도 전체
-    "서울특별시/전체",
-    "경기도/전체",
-    "인천광역시/전체",
-    "부산광역시/전체",
-    "대구광역시/전체",
-    "광주광역시/전체",
-    "대전광역시/전체",
-    "울산광역시/전체",
-    "세종특별자치시/전체",
-    "강원특별자치도/전체",
-    "충청북도/전체",
-    "충청남도/전체",
-    "전북특별자치도/전체",
-    "전라남도/전체",
-    "경상북도/전체",
-    "경상남도/전체",
-    "제주특별자치도/전체",
-
-    # 경기도
-    "경기도/수원시", "경기도/성남시", "경기도/의정부시", "경기도/안양시",
-    "경기도/부천시", "경기도/광명시", "경기도/평택시", "경기도/동두천시",
-    "경기도/안산시", "경기도/고양시", "경기도/과천시", "경기도/구리시",
-    "경기도/남양주시", "경기도/오산시", "경기도/시흥시", "경기도/군포시",
-    "경기도/의왕시", "경기도/하남시", "경기도/용인시", "경기도/파주시",
-    "경기도/이천시", "경기도/안성시", "경기도/김포시", "경기도/화성시",
-    "경기도/광주시", "경기도/양주시", "경기도/포천시", "경기도/여주시",
-    "경기도/연천군", "경기도/가평군", "경기도/양평군",
-
-    # 인천광역시 군 지역
-    "인천광역시/강화군", "인천광역시/옹진군",
-
-    # 부산광역시 군 지역
-    "부산광역시/기장군",
-
-    # 대구광역시 군 지역
-    "대구광역시/달성군", "대구광역시/군위군",
-
-    # 울산광역시 군 지역
-    "울산광역시/울주군",
-
-    # 세종
-    "세종특별자치시/세종시",
-
-    # 강원특별자치도
-    "강원특별자치도/춘천시", "강원특별자치도/원주시", "강원특별자치도/강릉시",
-    "강원특별자치도/동해시", "강원특별자치도/태백시", "강원특별자치도/속초시",
-    "강원특별자치도/삼척시", "강원특별자치도/홍천군", "강원특별자치도/횡성군",
-    "강원특별자치도/영월군", "강원특별자치도/평창군", "강원특별자치도/정선군",
-    "강원특별자치도/철원군", "강원특별자치도/화천군", "강원특별자치도/양구군",
-    "강원특별자치도/인제군", "강원특별자치도/고성군", "강원특별자치도/양양군",
-
-    # 충청북도
-    "충청북도/청주시", "충청북도/충주시", "충청북도/제천시",
-    "충청북도/보은군", "충청북도/옥천군", "충청북도/영동군",
-    "충청북도/증평군", "충청북도/진천군", "충청북도/괴산군",
-    "충청북도/음성군", "충청북도/단양군",
-
-    # 충청남도
-    "충청남도/천안시", "충청남도/공주시", "충청남도/보령시",
-    "충청남도/아산시", "충청남도/서산시", "충청남도/논산시",
-    "충청남도/계룡시", "충청남도/당진시", "충청남도/금산군",
-    "충청남도/부여군", "충청남도/서천군", "충청남도/청양군",
-    "충청남도/홍성군", "충청남도/예산군", "충청남도/태안군",
-
-    # 전북특별자치도
-    "전북특별자치도/전주시", "전북특별자치도/군산시", "전북특별자치도/익산시",
-    "전북특별자치도/정읍시", "전북특별자치도/남원시", "전북특별자치도/김제시",
-    "전북특별자치도/완주군", "전북특별자치도/진안군", "전북특별자치도/무주군",
-    "전북특별자치도/장수군", "전북특별자치도/임실군", "전북특별자치도/순창군",
-    "전북특별자치도/고창군", "전북특별자치도/부안군",
-
-    # 전라남도
-    "전라남도/목포시", "전라남도/여수시", "전라남도/순천시",
-    "전라남도/나주시", "전라남도/광양시", "전라남도/담양군",
-    "전라남도/곡성군", "전라남도/구례군", "전라남도/고흥군",
-    "전라남도/보성군", "전라남도/화순군", "전라남도/장흥군",
-    "전라남도/강진군", "전라남도/해남군", "전라남도/영암군",
-    "전라남도/무안군", "전라남도/함평군", "전라남도/영광군",
-    "전라남도/장성군", "전라남도/완도군", "전라남도/진도군",
-    "전라남도/신안군",
-
-    # 경상북도
-    "경상북도/포항시", "경상북도/경주시", "경상북도/김천시",
-    "경상북도/안동시", "경상북도/구미시", "경상북도/영주시",
-    "경상북도/영천시", "경상북도/상주시", "경상북도/문경시",
-    "경상북도/경산시", "경상북도/의성군", "경상북도/청송군",
-    "경상북도/영양군", "경상북도/영덕군", "경상북도/청도군",
-    "경상북도/고령군", "경상북도/성주군", "경상북도/칠곡군",
-    "경상북도/예천군", "경상북도/봉화군", "경상북도/울진군",
-    "경상북도/울릉군",
-
-    # 경상남도
-    "경상남도/창원시", "경상남도/진주시", "경상남도/통영시",
-    "경상남도/사천시", "경상남도/김해시", "경상남도/밀양시",
-    "경상남도/거제시", "경상남도/양산시", "경상남도/의령군",
-    "경상남도/함안군", "경상남도/창녕군", "경상남도/고성군",
-    "경상남도/남해군", "경상남도/하동군", "경상남도/산청군",
-    "경상남도/함양군", "경상남도/거창군", "경상남도/합천군",
-
-    # 제주특별자치도
-    "제주특별자치도/제주시", "제주특별자치도/서귀포시",
-
-    # 권역
-    "수도권",
-    "충청권",
-    "전라권",
-    "경상권",
+PROFILE_REGION_GROUPS = [
+    {
+        "title": "기본",
+        "items": [
+            ("전국", "전국"),
+        ],
+    },
+    {
+        "title": "시·도 전체",
+        "items": [
+            ("서울특별시/전체", "서울특별시"),
+            ("경기도/전체", "경기도"),
+            ("인천광역시/전체", "인천광역시"),
+            ("부산광역시/전체", "부산광역시"),
+            ("대구광역시/전체", "대구광역시"),
+            ("광주광역시/전체", "광주광역시"),
+            ("대전광역시/전체", "대전광역시"),
+            ("울산광역시/전체", "울산광역시"),
+            ("세종특별자치시/전체", "세종특별자치시"),
+            ("강원특별자치도/전체", "강원특별자치도"),
+            ("충청북도/전체", "충청북도"),
+            ("충청남도/전체", "충청남도"),
+            ("전북특별자치도/전체", "전북특별자치도"),
+            ("전라남도/전체", "전라남도"),
+            ("경상북도/전체", "경상북도"),
+            ("경상남도/전체", "경상남도"),
+            ("제주특별자치도/전체", "제주특별자치도"),
+        ],
+    },
+    {
+        "title": "경상남도",
+        "items": [
+            ("경상남도/창원시", "창원시"),
+            ("경상남도/진주시", "진주시"),
+            ("경상남도/통영시", "통영시"),
+            ("경상남도/사천시", "사천시"),
+            ("경상남도/김해시", "김해시"),
+            ("경상남도/밀양시", "밀양시"),
+            ("경상남도/거제시", "거제시"),
+            ("경상남도/양산시", "양산시"),
+            ("경상남도/의령군", "의령군"),
+            ("경상남도/함안군", "함안군"),
+            ("경상남도/창녕군", "창녕군"),
+            ("경상남도/고성군", "고성군"),
+            ("경상남도/남해군", "남해군"),
+            ("경상남도/하동군", "하동군"),
+            ("경상남도/산청군", "산청군"),
+            ("경상남도/함양군", "함양군"),
+            ("경상남도/거창군", "거창군"),
+            ("경상남도/합천군", "합천군"),
+        ],
+    },
+    {
+        "title": "경상북도",
+        "items": [
+            ("경상북도/포항시", "포항시"),
+            ("경상북도/경주시", "경주시"),
+            ("경상북도/김천시", "김천시"),
+            ("경상북도/안동시", "안동시"),
+            ("경상북도/구미시", "구미시"),
+            ("경상북도/영주시", "영주시"),
+            ("경상북도/영천시", "영천시"),
+            ("경상북도/상주시", "상주시"),
+            ("경상북도/문경시", "문경시"),
+            ("경상북도/경산시", "경산시"),
+            ("경상북도/의성군", "의성군"),
+            ("경상북도/청송군", "청송군"),
+            ("경상북도/영양군", "영양군"),
+            ("경상북도/영덕군", "영덕군"),
+            ("경상북도/청도군", "청도군"),
+            ("경상북도/고령군", "고령군"),
+            ("경상북도/성주군", "성주군"),
+            ("경상북도/칠곡군", "칠곡군"),
+            ("경상북도/예천군", "예천군"),
+            ("경상북도/봉화군", "봉화군"),
+            ("경상북도/울진군", "울진군"),
+            ("경상북도/울릉군", "울릉군"),
+        ],
+    },
+    {
+        "title": "부산·울산·대구",
+        "items": [
+            ("부산광역시/기장군", "기장군"),
+            ("울산광역시/울주군", "울주군"),
+            ("대구광역시/달성군", "달성군"),
+            ("대구광역시/군위군", "군위군"),
+        ],
+    },
+    {
+        "title": "충청남도",
+        "items": [
+            ("충청남도/천안시", "천안시"),
+            ("충청남도/공주시", "공주시"),
+            ("충청남도/보령시", "보령시"),
+            ("충청남도/아산시", "아산시"),
+            ("충청남도/서산시", "서산시"),
+            ("충청남도/논산시", "논산시"),
+            ("충청남도/계룡시", "계룡시"),
+            ("충청남도/당진시", "당진시"),
+            ("충청남도/금산군", "금산군"),
+            ("충청남도/부여군", "부여군"),
+            ("충청남도/서천군", "서천군"),
+            ("충청남도/청양군", "청양군"),
+            ("충청남도/홍성군", "홍성군"),
+            ("충청남도/예산군", "예산군"),
+            ("충청남도/태안군", "태안군"),
+        ],
+    },
+    {
+        "title": "충청북도",
+        "items": [
+            ("충청북도/청주시", "청주시"),
+            ("충청북도/충주시", "충주시"),
+            ("충청북도/제천시", "제천시"),
+            ("충청북도/보은군", "보은군"),
+            ("충청북도/옥천군", "옥천군"),
+            ("충청북도/영동군", "영동군"),
+            ("충청북도/증평군", "증평군"),
+            ("충청북도/진천군", "진천군"),
+            ("충청북도/괴산군", "괴산군"),
+            ("충청북도/음성군", "음성군"),
+            ("충청북도/단양군", "단양군"),
+        ],
+    },
+    {
+        "title": "전라남도",
+        "items": [
+            ("전라남도/목포시", "목포시"),
+            ("전라남도/여수시", "여수시"),
+            ("전라남도/순천시", "순천시"),
+            ("전라남도/나주시", "나주시"),
+            ("전라남도/광양시", "광양시"),
+            ("전라남도/담양군", "담양군"),
+            ("전라남도/곡성군", "곡성군"),
+            ("전라남도/구례군", "구례군"),
+            ("전라남도/고흥군", "고흥군"),
+            ("전라남도/보성군", "보성군"),
+            ("전라남도/화순군", "화순군"),
+            ("전라남도/장흥군", "장흥군"),
+            ("전라남도/강진군", "강진군"),
+            ("전라남도/해남군", "해남군"),
+            ("전라남도/영암군", "영암군"),
+            ("전라남도/무안군", "무안군"),
+            ("전라남도/함평군", "함평군"),
+            ("전라남도/영광군", "영광군"),
+            ("전라남도/장성군", "장성군"),
+            ("전라남도/완도군", "완도군"),
+            ("전라남도/진도군", "진도군"),
+            ("전라남도/신안군", "신안군"),
+        ],
+    },
+    {
+        "title": "전북특별자치도",
+        "items": [
+            ("전북특별자치도/전주시", "전주시"),
+            ("전북특별자치도/군산시", "군산시"),
+            ("전북특별자치도/익산시", "익산시"),
+            ("전북특별자치도/정읍시", "정읍시"),
+            ("전북특별자치도/남원시", "남원시"),
+            ("전북특별자치도/김제시", "김제시"),
+            ("전북특별자치도/완주군", "완주군"),
+            ("전북특별자치도/진안군", "진안군"),
+            ("전북특별자치도/무주군", "무주군"),
+            ("전북특별자치도/장수군", "장수군"),
+            ("전북특별자치도/임실군", "임실군"),
+            ("전북특별자치도/순창군", "순창군"),
+            ("전북특별자치도/고창군", "고창군"),
+            ("전북특별자치도/부안군", "부안군"),
+        ],
+    },
+    {
+        "title": "강원특별자치도",
+        "items": [
+            ("강원특별자치도/춘천시", "춘천시"),
+            ("강원특별자치도/원주시", "원주시"),
+            ("강원특별자치도/강릉시", "강릉시"),
+            ("강원특별자치도/동해시", "동해시"),
+            ("강원특별자치도/태백시", "태백시"),
+            ("강원특별자치도/속초시", "속초시"),
+            ("강원특별자치도/삼척시", "삼척시"),
+            ("강원특별자치도/홍천군", "홍천군"),
+            ("강원특별자치도/횡성군", "횡성군"),
+            ("강원특별자치도/영월군", "영월군"),
+            ("강원특별자치도/평창군", "평창군"),
+            ("강원특별자치도/정선군", "정선군"),
+            ("강원특별자치도/철원군", "철원군"),
+            ("강원특별자치도/화천군", "화천군"),
+            ("강원특별자치도/양구군", "양구군"),
+            ("강원특별자치도/인제군", "인제군"),
+            ("강원특별자치도/고성군", "고성군"),
+            ("강원특별자치도/양양군", "양양군"),
+        ],
+    },
+    {
+        "title": "경기도",
+        "items": [
+            ("경기도/수원시", "수원시"),
+            ("경기도/성남시", "성남시"),
+            ("경기도/의정부시", "의정부시"),
+            ("경기도/안양시", "안양시"),
+            ("경기도/부천시", "부천시"),
+            ("경기도/광명시", "광명시"),
+            ("경기도/평택시", "평택시"),
+            ("경기도/동두천시", "동두천시"),
+            ("경기도/안산시", "안산시"),
+            ("경기도/고양시", "고양시"),
+            ("경기도/과천시", "과천시"),
+            ("경기도/구리시", "구리시"),
+            ("경기도/남양주시", "남양주시"),
+            ("경기도/오산시", "오산시"),
+            ("경기도/시흥시", "시흥시"),
+            ("경기도/군포시", "군포시"),
+            ("경기도/의왕시", "의왕시"),
+            ("경기도/하남시", "하남시"),
+            ("경기도/용인시", "용인시"),
+            ("경기도/파주시", "파주시"),
+            ("경기도/이천시", "이천시"),
+            ("경기도/안성시", "안성시"),
+            ("경기도/김포시", "김포시"),
+            ("경기도/화성시", "화성시"),
+            ("경기도/광주시", "광주시"),
+            ("경기도/양주시", "양주시"),
+            ("경기도/포천시", "포천시"),
+            ("경기도/여주시", "여주시"),
+            ("경기도/연천군", "연천군"),
+            ("경기도/가평군", "가평군"),
+            ("경기도/양평군", "양평군"),
+        ],
+    },
+    {
+        "title": "제주특별자치도",
+        "items": [
+            ("제주특별자치도/제주시", "제주시"),
+            ("제주특별자치도/서귀포시", "서귀포시"),
+        ],
+    },
+    {
+        "title": "권역",
+        "items": [
+            ("수도권", "수도권"),
+            ("충청권", "충청권"),
+            ("전라권", "전라권"),
+            ("경상권", "경상권"),
+        ],
+    },
 ]
+
+PROFILE_REGION_OPTIONS = [
+    value
+    for group in PROFILE_REGION_GROUPS
+    for value, label in group["items"]
+]
+
+REGION_LABELS = {
+    value: label
+    for group in PROFILE_REGION_GROUPS
+    for value, label in group["items"]
+}
+
 
 REGION_KEYWORDS = {
     "전국": ["전국", "전지역", "전 지역", "지역제한없음", "지역 제한 없음", "제한없음", "제한 없음"],
@@ -831,7 +978,7 @@ def page_layout(title: str, subtitle: str, body: str) -> str:
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "gongsa-bid", "version": "profile-worktype-siping-1.0.0", "has_DATA_GO_KR_SERVICE_KEY": bool(DATA_GO_KR_SERVICE_KEY)}
+    return {"status": "ok", "service": "gongsa-bid", "version": "profile-clean-region-ui-1.0.0", "has_DATA_GO_KR_SERVICE_KEY": bool(DATA_GO_KR_SERVICE_KEY)}
 
 
 @app.get("/routes")
@@ -847,7 +994,7 @@ def home():
         <div class="menu"><a class="top-btn" href="/bids/songwon-page">전체 공고 보기</a><a class="top-btn" href="/bids/songwon-page?region=전국">전국 공고 보기</a><a class="top-btn" href="/bids/songwon-page?region=경남">경남 공고 보기</a><a class="top-btn" href="/company/profile">회사 프로필 등록</a><a class="top-btn" href="/company/profile-data" target="_blank">프로필 JSON 확인</a></div>
     </div>
     <div class="card"><h3>현재 저장된 회사 프로필</h3><div class="profile-box">
-        <strong>회사명:</strong> {h(profile.get("company_name"))}<br><strong>주소:</strong> {h(profile.get("address"))}<br><strong>전화:</strong> {h(profile.get("phone"))}<br><strong>팩스:</strong> {h(profile.get("fax"))}<br><strong>이메일:</strong> {h(profile.get("email"))}<br><strong>주 활동지역:</strong> {h(profile.get("main_region"))}<br><strong>입찰 가능지역:</strong> {h(", ".join(profile.get("possible_regions", [])))}<br><strong>보유 면허:</strong> {h(", ".join(profile.get("licenses", [])) if profile.get("licenses") else "아직 선택 안 함")}<br><strong>자재납품 품목:</strong> {h(", ".join(profile.get("material_supplies", [])) if profile.get("material_supplies") else "아직 선택 안 함")}<br><strong>주력 키워드:</strong> {h(profile.get("keyword_text"))}
+        <strong>회사명:</strong> {h(profile.get("company_name"))}<br><strong>주소:</strong> {h(profile.get("address"))}<br><strong>전화:</strong> {h(profile.get("phone"))}<br><strong>팩스:</strong> {h(profile.get("fax"))}<br><strong>이메일:</strong> {h(profile.get("email"))}<br><strong>주 활동지역:</strong> {h(region_display_name(profile.get("main_region")))}<br><strong>입찰 가능지역:</strong> {h(format_region_list(profile.get("possible_regions", [])))}<br><strong>보유 면허:</strong> {h(", ".join(profile.get("licenses", [])) if profile.get("licenses") else "아직 선택 안 함")}<br><strong>자재납품 품목:</strong> {h(", ".join(profile.get("material_supplies", [])) if profile.get("material_supplies") else "아직 선택 안 함")}<br><strong>주력 키워드:</strong> {h(profile.get("keyword_text"))}
     </div></div>'''
     return page_layout("gongsa-bid", "건설회사 전용 나라장터 공고 웹플랫폼", body)
 
@@ -856,7 +1003,7 @@ def home():
 def company_profile_page():
     profile = load_company_profile()
     body = f'''
-    <div class="card"><div class="summary"><span class="badge">회사 프로필 등록</span><span class="badge">시·도/시·군 형식 지역 선택</span><a class="top-btn" href="/">첫 화면</a><a class="top-btn" href="/bids/songwon-page">전체 공고 보기</a></div></div>
+    <div class="card"><div class="summary"><span class="badge">회사 프로필 등록</span><span class="badge">깔끔한 지역 선택</span><a class="top-btn" href="/">첫 화면</a><a class="top-btn" href="/bids/songwon-page">전체 공고 보기</a></div></div>
     <form action="/company/profile-save" method="get">
         <div class="card"><h3>기본 정보</h3><div class="form-grid">
             <div class="form-row"><label>회사명</label><input type="text" name="company_name" value="{h(profile.get("company_name"))}"></div>
@@ -866,7 +1013,7 @@ def company_profile_page():
             <div class="form-row"><label>이메일</label><input type="email" name="email" value="{h(profile.get("email"))}"></div>
             <div class="form-row"><label>주 활동지역</label><select name="main_region">{render_select_options(PROFILE_REGION_OPTIONS, profile.get("main_region"))}</select></div>
         </div><div class="form-row"><label>주소</label><input type="text" name="address" value="{h(profile.get("address"))}"></div></div>
-        <div class="card"><h3>입찰 가능지역</h3><p class="notice">경상남도/김해시, 경상남도/창녕군, 경상남도/전체, 전국처럼 여러 개를 선택할 수 있습니다.</p>{render_checkbox_group("possible_regions", PROFILE_REGION_OPTIONS, profile.get("possible_regions", []))}</div>
+        <div class="card"><h3>입찰 가능지역</h3><p class="notice">전국, 경상남도, 김해시, 창녕군처럼 깔끔하게 보이지만 내부 저장은 정확히 구분됩니다.</p>{render_checkbox_group("possible_regions", PROFILE_REGION_OPTIONS, profile.get("possible_regions", []))}</div>
         <div class="card"><h3>보유 종합건설 면허</h3>{render_checkbox_group("licenses", GENERAL_CONSTRUCTION_LICENSE_OPTIONS, profile.get("licenses", []))}</div>
         <div class="card"><h3>보유 전문건설 면허 / 주력분야</h3>{render_checkbox_group("licenses", SPECIALTY_CONSTRUCTION_LICENSE_OPTIONS, profile.get("licenses", []))}</div>
         <div class="card"><h3>자재납품 가능 품목</h3><p class="notice">자재납품은 건설업 면허와 따로 저장합니다.</p>{render_checkbox_group("material_supplies", MATERIAL_SUPPLY_OPTIONS, profile.get("material_supplies", []))}</div>
@@ -881,7 +1028,7 @@ def company_profile_save(company_name: str = Query(""), manager_name: str = Quer
     save_company_profile(profile)
     body = f'''
     <div class="card"><h2>회사 프로필 저장 완료</h2><p class="notice">회사 프로필이 저장되었습니다.</p><div class="profile-box">
-        <strong>회사명:</strong> {h(profile.get("company_name"))}<br><strong>입찰 가능지역:</strong> {h(", ".join(profile.get("possible_regions", [])))}<br><strong>보유 면허:</strong> {h(", ".join(profile.get("licenses", [])) if profile.get("licenses") else "선택 안 함")}<br><strong>자재납품 품목:</strong> {h(", ".join(profile.get("material_supplies", [])) if profile.get("material_supplies") else "선택 안 함")}<br><strong>저장시간:</strong> {h(profile.get("updated_at"))}
+        <strong>회사명:</strong> {h(profile.get("company_name"))}<br><strong>입찰 가능지역:</strong> {h(format_region_list(profile.get("possible_regions", [])))}<br><strong>보유 면허:</strong> {h(", ".join(profile.get("licenses", [])) if profile.get("licenses") else "선택 안 함")}<br><strong>자재납품 품목:</strong> {h(", ".join(profile.get("material_supplies", [])) if profile.get("material_supplies") else "선택 안 함")}<br><strong>저장시간:</strong> {h(profile.get("updated_at"))}
     </div><div class="menu"><a class="top-btn" href="/">첫 화면</a><a class="top-btn" href="/company/profile">다시 수정하기</a><a class="top-btn" href="/company/profile-data" target="_blank">JSON 확인</a><a class="top-btn" href="/bids/songwon-page">공고 보기</a></div></div>'''
     return page_layout("회사 프로필 저장 완료", "저장된 회사 정보를 확인하세요", body)
 
@@ -922,5 +1069,5 @@ def songwon_page(region: str = Query("전체"), keyword: str = Query(""), days_f
         keyword_label = "회사 프로필 주력 키워드"
     result = search_bids_by_keywords(keywords, region, True, days_forward, 1, 100)
     error_html = f'<div class="card"><h3>API 오류</h3><div class="error">{h(json.dumps(result.get("errors"), ensure_ascii=False, indent=2))}</div></div>' if result.get("errors") else ""
-    body = f'''<div class="card"><div class="summary"><span class="badge">검색 범위: {h(keyword_label)}</span><span class="badge">선택 지역: {h(region)}</span><span class="badge">공고 수: {h(result.get("count"))}개</span><span class="badge">마감 지난 공고 제외</span><a class="top-btn" href="/">첫 화면</a><a class="top-btn" href="/company/profile">회사 프로필</a><a class="top-btn" href="/bids/songwon-test?region={quote(region)}" target="_blank">JSON 보기</a></div><form class="search-form" action="/bids/songwon-page" method="get"><input type="text" name="keyword" value="{h(keyword)}" placeholder="공고명 검색 예: 포장, 배수로, 도로 / 비우면 회사 프로필 키워드"><input type="hidden" name="region" value="{h(region)}"><button type="submit">공고명 검색</button><a class="top-btn" href="/bids/songwon-page?region={quote(region)}">검색 초기화</a></form></div><div class="card"><h3>지역별 보기</h3><p class="notice">전체는 지역 상관없이 모든 공고를 보여줍니다.<br>전국은 지역제한 없음 문구가 있거나 금액이 100억 이상인 공고를 보여줍니다.<br>경상남도/김해시, 충청남도/천안시 같은 지역 선택은 회사 프로필에서 저장할 수 있습니다.</p><div class="menu">{render_region_buttons("/bids/songwon-page", region, keyword)}</div></div>{error_html}<div class="card">{render_bid_table(result.get("bids", []))}</div>'''
+    body = f'''<div class="card"><div class="summary"><span class="badge">검색 범위: {h(keyword_label)}</span><span class="badge">선택 지역: {h(region)}</span><span class="badge">공고 수: {h(result.get("count"))}개</span><span class="badge">마감 지난 공고 제외</span><a class="top-btn" href="/">첫 화면</a><a class="top-btn" href="/company/profile">회사 프로필</a><a class="top-btn" href="/bids/songwon-test?region={quote(region)}" target="_blank">JSON 보기</a></div><form class="search-form" action="/bids/songwon-page" method="get"><input type="text" name="keyword" value="{h(keyword)}" placeholder="공고명 검색 예: 포장, 배수로, 도로 / 비우면 회사 프로필 키워드"><input type="hidden" name="region" value="{h(region)}"><button type="submit">공고명 검색</button><a class="top-btn" href="/bids/songwon-page?region={quote(region)}">검색 초기화</a></form></div><div class="card"><h3>지역별 보기</h3><p class="notice">전체는 지역 상관없이 모든 공고를 보여줍니다.<br>전국은 지역제한 없음 문구가 있거나 금액이 100억 이상인 공고를 보여줍니다.<br>김해시, 창녕군 같은 지역 선택은 회사 프로필에서 깔끔하게 저장할 수 있습니다.</p><div class="menu">{render_region_buttons("/bids/songwon-page", region, keyword)}</div></div>{error_html}<div class="card">{render_bid_table(result.get("bids", []))}</div>'''
     return page_layout("송원건설 전체 공고 검색", "회사 프로필 전국 지역 선택 추가 버전", body)
