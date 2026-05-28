@@ -1,1 +1,12 @@
-from fastapi import FastAPI; from fastapi.responses import HTMLResponse; app=FastAPI(); HTML="<html><head><meta charset='utf-8'><title>gongsa-bid</title></head><body style='font-family:Arial;padding:30px;background:#f4f6f8'><div style='max-width:900px;margin:auto;background:white;padding:30px;border-radius:14px'><h1>gongsa-bid</h1><h2>건설회사 전용 나라장터 맞춤공고 추천 웹사이트</h2><p>현재는 송원건설 기준으로 나라장터 맞춤공고 추천 기능을 만들고 있습니다.</p><hr><h3>회사 정보</h3><p><b>회사명:</b> 주식회사 송원건설</p><p><b>주소:</b> 경상남도 김해시 삼문로19, 1205호</p><p><b>전화:</b> 055-339-4763</p><p><b>팩스:</b> 055-339-4764</p><p><b>이메일:</b> songwon4763@naver.com</p><hr><h3>송원건설 주력 키워드</h3><p>포장, 배수, 배수로, 상하수도, 관로, 도로, 하천, 소하천, 옹벽, 측구, 맨홀, 농로, 재해복구, 정비, 보수</p><hr><p>다음 단계에서는 나라장터 공고 목록을 이 화면 아래에 표시합니다.</p></div></body></html>"; app.add_api_route("/", lambda: HTML, response_class=HTMLResponse); app.add_api_route("/health", lambda: {"status":"ok","service":"gongsa-bid"})
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
+
+app = FastAPI()
+
+@app.get("/", response_class=HTMLResponse)
+def home():
+    return "<h1>gongsa-bid</h1><p>송원건설 나라장터 맞춤공고 추천 웹사이트 테스트입니다.</p>"
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "gongsa-bid"}
