@@ -9,7 +9,7 @@ from urllib.parse import quote
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
-app = FastAPI(title="gongsa-bid", version="region-full-1.0.0")
+app = FastAPI(title="gongsa-bid", version="region-nationwide-amount-1.0.0")
 
 
 # =========================================================
@@ -28,7 +28,9 @@ SONGWON_KEYWORDS = [
     "맨홀", "농로", "재해복구", "정비", "보수",
 ]
 
-# 화면에 표시할 전체 지역 버튼
+# 전국 단위 입찰로 볼 금액 기준: 100억 원
+NATIONWIDE_AMOUNT_LIMIT = 10_000_000_000
+
 REGION_BUTTONS = [
     "전체",
     "전국",
@@ -55,13 +57,15 @@ REGION_BUTTONS = [
     "경상권",
 ]
 
-# 지역 필터용 키워드
-# 지금 단계에서는 공고명/기관명/참가가능지역/제한지역 등에 들어있는 글자를 기준으로 필터합니다.
-# 나중에 "참가가능지역조회 API"를 붙이면 더 정확하게 만들 수 있습니다.
 REGION_KEYWORDS = {
     "전국": [
-        "전국", "지역제한없음", "지역 제한 없음", "전 지역", "전지역",
-        "제한없음", "제한 없음",
+        "전국",
+        "전지역",
+        "전 지역",
+        "지역제한없음",
+        "지역 제한 없음",
+        "제한없음",
+        "제한 없음",
     ],
     "서울": ["서울", "서울특별시"],
     "경기": ["경기", "경기도"],
@@ -81,7 +85,6 @@ REGION_KEYWORDS = {
     "경남": ["경남", "경상남도", "김해", "김해시"],
     "제주": ["제주", "제주도", "제주특별자치도"],
 
-    # 묶음 지역
     "수도권": ["서울", "서울특별시", "경기", "경기도", "인천", "인천광역시"],
     "충청권": [
         "충북", "충청북도",
@@ -112,6 +115,23 @@ CATEGORY_KEYWORDS = {
     "옹벽/구조물": ["옹벽", "석축", "블록", "구조물"],
     "재해복구/정비/보수": ["재해복구", "복구", "정비", "보수", "유지보수"],
 }
+
+AMOUNT_KEYS = [
+    "presmptPrce",
+    "asignBdgtAmt",
+    "bssamt",
+    "baseAmount",
+    "bdgtAmt",
+    "cntrctAmt",
+    "totPrdprcNum",
+    "추정가격",
+    "추정금액",
+    "기초금액",
+    "예정금액",
+    "배정예산액",
+    "공사예정금액",
+    "총공사금액",
+]
 
 
 # =========================================================
@@ -177,12 +197,65 @@ def parse_date(value):
     return None
 
 
+def parse_money_to_number(value) -> int:
+    if value is None:
+        return 0
+
+    text = str(value).strip()
+
+    if not text:
+        return 0
+
+    if "억" in text:
+        numbers = re.sub(r"[^0-9.]", "", text)
+        try:
+            return int(float(numbers) * 100_000_000)
+        except Exception:
+            return 0
+
+    numbers = re.sub(r"[^0-9]", "", text)
+
+    if not numbers:
+        return 0
+
+    try:
+        return int(numbers)
+    except Exception:
+        return 0
+
+
+def format_money(amount: int) -> str:
+    if not amount:
+        return "-"
+
+    if amount >= 100_000_000:
+        eok = amount / 100_000_000
+        return f"{eok:,.1f}억"
+
+    return f"{amount:,}원"
+
+
 def get_first(item: dict, keys: list, default: str = "") -> str:
     for key in keys:
         value = item.get(key)
         if value not in (None, ""):
             return str(value)
     return default
+
+
+def get_bid_amount(item: dict) -> int:
+    amounts = []
+
+    for key in AMOUNT_KEYS:
+        value = item.get(key)
+        amount = parse_money_to_number(value)
+        if amount > 0:
+            amounts.append(amount)
+
+    if not amounts:
+        return 0
+
+    return max(amounts)
 
 
 def get_deadline(item: dict) -> str:
@@ -268,7 +341,6 @@ def make_search_text(item: dict) -> str:
         if value:
             parts.append(str(value))
 
-    # 그래도 못 잡는 경우를 위해 전체 값도 포함
     for value in item.values():
         if value:
             parts.append(str(value))
@@ -276,24 +348,36 @@ def make_search_text(item: dict) -> str:
     return " ".join(parts)
 
 
+def get_nationwide_reason(item: dict) -> str:
+    text = make_search_text(item)
+    amount = get_bid_amount(item)
+
+    nationwide_keywords = REGION_KEYWORDS.get("전국", [])
+
+    if any(keyword in text for keyword in nationwide_keywords):
+        return "전국/지역제한없음 문구"
+
+    if amount >= NATIONWIDE_AMOUNT_LIMIT:
+        return "금액 100억 이상"
+
+    return ""
+
+
 def match_region(item: dict, region: str) -> bool:
     if not region or region == "전체":
         return True
 
     region = region.strip()
+
+    if region == "전국":
+        return bool(get_nationwide_reason(item))
+
     keywords = REGION_KEYWORDS.get(region)
 
     if not keywords:
         return True
 
     text = make_search_text(item)
-
-    # 전국은 지역 정보가 비어 있는 공고도 일단 포함합니다.
-    # 나중에 참가가능지역 API를 붙이면 더 정확하게 바꿀 수 있습니다.
-    if region == "전국":
-        region_text = get_region_text(item)
-        if not region_text:
-            return True
 
     return any(keyword in text for keyword in keywords)
 
@@ -319,6 +403,10 @@ def infer_region_label(item: dict) -> str:
 
     if found:
         return ", ".join(dict.fromkeys(found))
+
+    nationwide_reason = get_nationwide_reason(item)
+    if nationwide_reason:
+        return "전국"
 
     return "지역정보 없음"
 
@@ -417,8 +505,6 @@ def build_api_url(params: dict) -> str:
     if not key:
         return ""
 
-    # 서비스키가 이미 인코딩된 키면 그대로 사용
-    # 디코딩된 일반 키면 인코딩해서 사용
     safe_key = key if "%" in key else quote(key, safe="")
 
     query_parts = [f"serviceKey={safe_key}"]
@@ -502,11 +588,15 @@ def fetch_nara_bids(
 
 def simplify_bid(item: dict, keyword: str = "") -> dict:
     deadline = get_deadline(item)
+    amount = get_bid_amount(item)
 
     return {
         "keyword": keyword,
         "category": infer_category(item),
         "region_label": infer_region_label(item),
+        "nationwide_reason": get_nationwide_reason(item),
+        "amount": amount,
+        "amount_label": format_money(amount),
         "bid_no": get_bid_no(item),
         "bid_ord": get_bid_ord(item),
         "bid_name": get_bid_name(item),
@@ -559,7 +649,6 @@ def search_bids_by_keywords(
 
                 all_items.append(simplify_bid(item, keyword=keyword))
 
-    # 중복 제거
     deduped = []
     seen = set()
 
@@ -577,7 +666,6 @@ def search_bids_by_keywords(
         seen.add(key)
         deduped.append(bid)
 
-    # 마감일 빠른 순 정렬
     def sort_key(bid):
         dt = parse_date(bid.get("deadline"))
         if not dt:
@@ -637,6 +725,8 @@ def render_bid_table(bids: list) -> str:
         elif dday == "마감":
             dday_class += " closed"
 
+        nationwide_reason = bid.get("nationwide_reason") or "-"
+
         rows.append(
             f"""
             <tr>
@@ -648,6 +738,8 @@ def render_bid_table(bids: list) -> str:
                 </td>
                 <td>{h(bid.get("category"))}</td>
                 <td>{h(bid.get("region_label"))}</td>
+                <td>{h(bid.get("amount_label"))}</td>
+                <td>{h(nationwide_reason)}</td>
                 <td>{h(bid.get("agency"))}</td>
                 <td>{h(bid.get("deadline"))}</td>
                 <td>
@@ -669,6 +761,8 @@ def render_bid_table(bids: list) -> str:
                     <th>공고명</th>
                     <th>분류</th>
                     <th>지역</th>
+                    <th>금액</th>
+                    <th>전국 사유</th>
                     <th>기관</th>
                     <th>마감일</th>
                     <th>나라장터</th>
@@ -720,7 +814,7 @@ def page_layout(title: str, subtitle: str, body: str) -> str:
             }}
 
             main {{
-                max-width: 1500px;
+                max-width: 1600px;
                 margin: 0 auto;
                 padding: 20px;
             }}
@@ -815,7 +909,7 @@ def page_layout(title: str, subtitle: str, body: str) -> str:
             table {{
                 width: 100%;
                 border-collapse: collapse;
-                min-width: 1100px;
+                min-width: 1350px;
             }}
 
             th,
@@ -840,7 +934,7 @@ def page_layout(title: str, subtitle: str, body: str) -> str:
             }}
 
             .title {{
-                min-width: 330px;
+                min-width: 340px;
             }}
 
             .bid-name {{
@@ -931,7 +1025,7 @@ def health():
     return {
         "status": "ok",
         "service": "gongsa-bid",
-        "version": "region-full-1.0.0",
+        "version": "region-nationwide-amount-1.0.0",
         "has_DATA_GO_KR_SERVICE_KEY": bool(DATA_GO_KR_SERVICE_KEY),
     }
 
@@ -947,6 +1041,7 @@ def routes():
             "/bids/nara-page?keyword=포장",
             "/bids/songwon-test",
             "/bids/songwon-page",
+            "/bids/songwon-page?region=전국",
             "/bids/songwon-page?region=서울",
             "/bids/songwon-page?region=경기",
             "/bids/songwon-page?region=충북",
@@ -964,11 +1059,13 @@ def home():
         <h2>공사입찰 공고 검색</h2>
         <p class="notice">
             송원건설 주력 키워드 15개로 나라장터 공사 공고를 검색합니다.<br>
-            이번 버전은 서울, 경기, 충청도 포함해서 지역별 버튼을 전체 확장했습니다.
+            이번 버전은 지역별 버튼과 전국 버튼을 넣었습니다.<br>
+            전국 버튼은 지역제한 없음 문구가 있거나 금액이 100억 이상인 공고를 보여줍니다.
         </p>
 
         <div class="menu">
             <a class="top-btn" href="/bids/songwon-page">전체 공고 보기</a>
+            <a class="top-btn" href="/bids/songwon-page?region=전국">전국 공고 보기</a>
             <a class="top-btn" href="/bids/songwon-page?region=서울">서울 공고 보기</a>
             <a class="top-btn" href="/bids/songwon-page?region=경기">경기 공고 보기</a>
             <a class="top-btn" href="/bids/songwon-page?region=충북">충북 공고 보기</a>
@@ -1102,8 +1199,6 @@ def songwon_page(
     keyword: str = Query("", description="비워두면 송원 주력 키워드 전체 검색"),
     days_forward: int = Query(30),
 ):
-    # 검색창에 키워드를 넣으면 그 키워드만 검색
-    # 비워두면 송원건설 주력 키워드 15개 전체 검색
     keywords = [keyword.strip()] if keyword.strip() else SONGWON_KEYWORDS
 
     result = search_bids_by_keywords(
@@ -1151,7 +1246,8 @@ def songwon_page(
     <div class="card">
         <h3>지역별 보기</h3>
         <p class="notice">
-            전체 지역을 넣었습니다.<br>
+            전체는 지역 상관없이 모든 공고를 보여줍니다.<br>
+            전국은 지역제한 없음 문구가 있거나 금액이 100억 이상인 공고를 보여줍니다.<br>
             서울, 경기, 인천, 부산, 대구, 광주, 대전, 울산, 세종, 강원,
             충북, 충남, 전북, 전남, 경북, 경남, 제주까지 볼 수 있습니다.<br>
             수도권, 충청권, 전라권, 경상권 묶음 버튼도 같이 넣었습니다.
@@ -1171,6 +1267,6 @@ def songwon_page(
 
     return page_layout(
         "송원건설 전체 공고 검색",
-        "지역별 필터 전체 확장 버전",
+        "지역별 필터 + 전국 100억 이상 필터 버전",
         body,
     )
