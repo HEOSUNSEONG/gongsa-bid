@@ -64,6 +64,28 @@ def is_closed(close_date: str):
         return False
 
 
+def get_dday_text(close_date: str):
+    if not close_date:
+        return "마감일 정보 없음"
+
+    try:
+        close_dt = datetime.strptime(close_date, "%Y-%m-%d %H:%M:%S")
+        today = datetime.now().date()
+        close_day = close_dt.date()
+        days_left = (close_day - today).days
+
+        if days_left < 0:
+            return "마감"
+        elif days_left == 0:
+            return "오늘 마감"
+        elif days_left == 1:
+            return "내일 마감"
+        else:
+            return f"D-{days_left}"
+    except Exception:
+        return "마감일 확인 필요"
+
+
 def classify_bid(title: str, search_keyword: str):
     text = f"{title or ''} {search_keyword or ''}"
 
@@ -283,6 +305,7 @@ def render_bid_cards(bids):
         agency = escape(str(bid.get("발주기관") or ""))
         notice_agency = escape(str(bid.get("공고기관") or ""))
         close_date = escape(str(bid.get("마감일") or ""))
+        dday_text = escape(get_dday_text(bid.get("마감일")))
         keyword = escape(str(bid.get("검색키워드") or ""))
         category_name = escape(str(bid.get("분류명") or "기타"))
         link = bid.get("나라장터링크") or "#"
@@ -303,6 +326,7 @@ def render_bid_cards(bids):
             <p><b>발주기관:</b> {agency}</p>
             <p><b>공고기관:</b> {notice_agency}</p>
             <p><b>마감일:</b> {close_date}</p>
+            <p><b>남은기간:</b> <span style="color:#dc2626; font-weight:bold;">{dday_text}</span></p>
             <p>
                 <a href="{link}" target="_blank"
                    style="display:inline-block; padding:10px 14px; background:#111827; color:white; text-decoration:none; border-radius:8px;">
