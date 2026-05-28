@@ -5,11 +5,12 @@ import json
 import requests
 from datetime import datetime, timedelta
 from urllib.parse import quote
+from typing import List
 
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
-app = FastAPI(title="gongsa-bid", version="region-nationwide-amount-1.0.0")
+app = FastAPI(title="gongsa-bid", version="company-profile-1.0.0")
 
 
 # =========================================================
@@ -22,14 +23,15 @@ G2B_CONSTRUCTION_API_URL = (
     "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoCnstwk"
 )
 
+PROFILE_FILE = "company_profile.json"
+
 SONGWON_KEYWORDS = [
     "포장", "배수", "배수로", "상하수도", "관로",
     "도로", "하천", "소하천", "옹벽", "측구",
     "맨홀", "농로", "재해복구", "정비", "보수",
 ]
 
-# 전국 단위 입찰로 볼 금액 기준: 100억 원
-NATIONWIDE_AMOUNT_LIMIT = 10_000_000_000
+NATIONWIDE_AMOUNT_LIMIT = 10_000_000_000  # 100억 원
 
 REGION_BUTTONS = [
     "전체",
@@ -114,6 +116,38 @@ CATEGORY_KEYWORDS = {
     "하천/소하천": ["하천", "소하천", "구거", "제방"],
     "옹벽/구조물": ["옹벽", "석축", "블록", "구조물"],
     "재해복구/정비/보수": ["재해복구", "복구", "정비", "보수", "유지보수"],
+}
+
+LICENSE_OPTIONS = [
+    "토목공사업",
+    "토목건축공사업",
+    "상하수도설비공사업",
+    "지반조성·포장공사업",
+    "포장공사업",
+    "철근·콘크리트공사업",
+    "구조물해체·비계공사업",
+    "금속창호·지붕건축물조립공사업",
+    "도장·습식·방수·석공사업",
+    "조경공사업",
+    "조경식재·시설물공사업",
+    "시설물유지관리",
+    "기타",
+]
+
+LICENSE_KEYWORDS = {
+    "토목공사업": ["토목", "토목공사업", "토목공사"],
+    "토목건축공사업": ["토목건축", "토건", "토목건축공사업"],
+    "상하수도설비공사업": ["상하수도", "상수도", "하수도", "관로", "관거", "오수", "우수", "맨홀"],
+    "지반조성·포장공사업": ["지반조성", "포장", "아스콘", "아스팔트", "콘크리트포장", "보도포장"],
+    "포장공사업": ["포장", "아스콘", "아스팔트", "콘크리트포장", "보도포장"],
+    "철근·콘크리트공사업": ["철근", "콘크리트", "철콘", "옹벽", "측구", "수로", "구조물"],
+    "구조물해체·비계공사업": ["해체", "철거", "비계"],
+    "금속창호·지붕건축물조립공사업": ["금속", "창호", "지붕", "판넬"],
+    "도장·습식·방수·석공사업": ["도장", "습식", "방수", "석공", "석축"],
+    "조경공사업": ["조경", "식재", "공원"],
+    "조경식재·시설물공사업": ["조경", "식재", "시설물", "공원"],
+    "시설물유지관리": ["유지관리", "보수", "정비", "보강", "시설물"],
+    "기타": [],
 }
 
 AMOUNT_KEYS = [
@@ -421,6 +455,20 @@ def infer_category(item: dict) -> str:
     return "기타"
 
 
+def infer_licenses(item: dict) -> list:
+    text = make_search_text(item)
+    found = []
+
+    for license_name, keywords in LICENSE_KEYWORDS.items():
+        if not keywords:
+            continue
+
+        if any(keyword in text for keyword in keywords):
+            found.append(license_name)
+
+    return found
+
+
 def get_d_day(deadline_text: str) -> str:
     deadline = parse_date(deadline_text)
 
@@ -589,6 +637,7 @@ def fetch_nara_bids(
 def simplify_bid(item: dict, keyword: str = "") -> dict:
     deadline = get_deadline(item)
     amount = get_bid_amount(item)
+    licenses = infer_licenses(item)
 
     return {
         "keyword": keyword,
@@ -597,6 +646,7 @@ def simplify_bid(item: dict, keyword: str = "") -> dict:
         "nationwide_reason": get_nationwide_reason(item),
         "amount": amount,
         "amount_label": format_money(amount),
+        "license_label": ", ".join(licenses) if licenses else "-",
         "bid_no": get_bid_no(item),
         "bid_ord": get_bid_ord(item),
         "bid_name": get_bid_name(item),
@@ -686,7 +736,63 @@ def search_bids_by_keywords(
 
 
 # =========================================================
-# HTML 화면
+# 회사 프로필 저장 / 불러오기
+# =========================================================
+
+def default_company_profile() -> dict:
+    return {
+        "company_name": "주식회사 송원건설",
+        "manager_name": "",
+        "address": "경상남도 김해시 삼문로19, 1205호",
+        "phone": "055-339-4763",
+        "fax": "055-339-4764",
+        "email": "songwon4763@naver.com",
+        "main_region": "경남",
+        "possible_regions": ["경남", "부산", "울산", "경북", "전국"],
+        "licenses": [],
+        "keyword_text": "포장, 배수, 배수로, 상하수도, 관로, 도로, 하천, 소하천, 옹벽, 측구, 맨홀, 농로, 재해복구, 정비, 보수",
+        "updated_at": "",
+    }
+
+
+def load_company_profile() -> dict:
+    if not os.path.exists(PROFILE_FILE):
+        return default_company_profile()
+
+    try:
+        with open(PROFILE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        base = default_company_profile()
+        base.update(data)
+        return base
+
+    except Exception:
+        return default_company_profile()
+
+
+def save_company_profile(profile: dict) -> None:
+    with open(PROFILE_FILE, "w", encoding="utf-8") as f:
+        json.dump(profile, f, ensure_ascii=False, indent=2)
+
+
+def split_keywords(keyword_text: str) -> list:
+    if not keyword_text:
+        return SONGWON_KEYWORDS
+
+    parts = re.split(r"[,，\n/]+", keyword_text)
+    keywords = []
+
+    for part in parts:
+        text = part.strip()
+        if text:
+            keywords.append(text)
+
+    return keywords or SONGWON_KEYWORDS
+
+
+# =========================================================
+# HTML 화면 함수
 # =========================================================
 
 def render_region_buttons(base_path: str, current_region: str, keyword: str = "") -> str:
@@ -737,6 +843,7 @@ def render_bid_table(bids: list) -> str:
                     <div class="small">공고번호: {h(bid.get("bid_no"))} / 키워드: {h(bid.get("keyword"))}</div>
                 </td>
                 <td>{h(bid.get("category"))}</td>
+                <td>{h(bid.get("license_label"))}</td>
                 <td>{h(bid.get("region_label"))}</td>
                 <td>{h(bid.get("amount_label"))}</td>
                 <td>{h(nationwide_reason)}</td>
@@ -760,6 +867,7 @@ def render_bid_table(bids: list) -> str:
                     <th>D-day</th>
                     <th>공고명</th>
                     <th>분류</th>
+                    <th>면허 추정</th>
                     <th>지역</th>
                     <th>금액</th>
                     <th>전국 사유</th>
@@ -868,13 +976,21 @@ def page_layout(title: str, subtitle: str, body: str) -> str:
                 margin-top: 12px;
             }}
 
-            input {{
-                min-width: 260px;
-                flex: 1;
+            input[type="text"],
+            input[type="email"],
+            textarea,
+            select {{
+                width: 100%;
                 padding: 11px 12px;
                 border: 1px solid #d0d7de;
                 border-radius: 10px;
                 font-size: 15px;
+                font-family: inherit;
+            }}
+
+            textarea {{
+                min-height: 90px;
+                resize: vertical;
             }}
 
             button {{
@@ -909,7 +1025,7 @@ def page_layout(title: str, subtitle: str, body: str) -> str:
             table {{
                 width: 100%;
                 border-collapse: collapse;
-                min-width: 1350px;
+                min-width: 1450px;
             }}
 
             th,
@@ -1000,6 +1116,59 @@ def page_layout(title: str, subtitle: str, body: str) -> str:
                 border-radius: 10px;
                 white-space: pre-wrap;
             }}
+
+            .form-grid {{
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 14px;
+            }}
+
+            .form-row {{
+                margin-bottom: 14px;
+            }}
+
+            .form-row label {{
+                display: block;
+                font-weight: 700;
+                margin-bottom: 7px;
+            }}
+
+            .check-grid {{
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 8px;
+            }}
+
+            .check-item {{
+                border: 1px solid #e5e7eb;
+                border-radius: 10px;
+                padding: 10px;
+                background: #fafafa;
+                font-size: 14px;
+            }}
+
+            .check-item input {{
+                margin-right: 6px;
+            }}
+
+            .profile-box {{
+                line-height: 1.8;
+                color: #344054;
+            }}
+
+            .profile-box strong {{
+                color: #111827;
+            }}
+
+            @media (max-width: 800px) {{
+                .form-grid {{
+                    grid-template-columns: 1fr;
+                }}
+
+                .check-grid {{
+                    grid-template-columns: 1fr;
+                }}
+            }}
         </style>
     </head>
     <body>
@@ -1016,6 +1185,23 @@ def page_layout(title: str, subtitle: str, body: str) -> str:
     """
 
 
+def render_checkbox_group(name: str, options: list, selected: list) -> str:
+    html_parts = []
+
+    for option in options:
+        checked = "checked" if option in selected else ""
+        html_parts.append(
+            f"""
+            <label class="check-item">
+                <input type="checkbox" name="{h(name)}" value="{h(option)}" {checked}>
+                {h(option)}
+            </label>
+            """
+        )
+
+    return f'<div class="check-grid">{"".join(html_parts)}</div>'
+
+
 # =========================================================
 # 라우트
 # =========================================================
@@ -1025,7 +1211,7 @@ def health():
     return {
         "status": "ok",
         "service": "gongsa-bid",
-        "version": "region-nationwide-amount-1.0.0",
+        "version": "company-profile-1.0.0",
         "has_DATA_GO_KR_SERVICE_KEY": bool(DATA_GO_KR_SERVICE_KEY),
     }
 
@@ -1037,16 +1223,13 @@ def routes():
             "/",
             "/health",
             "/routes",
+            "/company/profile",
+            "/company/profile-data",
             "/bids/nara?keyword=포장",
             "/bids/nara-page?keyword=포장",
             "/bids/songwon-test",
             "/bids/songwon-page",
             "/bids/songwon-page?region=전국",
-            "/bids/songwon-page?region=서울",
-            "/bids/songwon-page?region=경기",
-            "/bids/songwon-page?region=충북",
-            "/bids/songwon-page?region=충남",
-            "/bids/songwon-page?region=충청권",
             "/bids/songwon-page?region=경남",
         ]
     }
@@ -1054,36 +1237,38 @@ def routes():
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    body = """
+    profile = load_company_profile()
+
+    body = f"""
     <div class="card">
         <h2>공사입찰 공고 검색</h2>
         <p class="notice">
-            송원건설 주력 키워드 15개로 나라장터 공사 공고를 검색합니다.<br>
-            이번 버전은 지역별 버튼과 전국 버튼을 넣었습니다.<br>
-            전국 버튼은 지역제한 없음 문구가 있거나 금액이 100억 이상인 공고를 보여줍니다.
+            송원건설 주력 키워드로 나라장터 공사 공고를 검색합니다.<br>
+            이번 버전은 회사 프로필 등록 화면을 추가했습니다.
         </p>
 
         <div class="menu">
             <a class="top-btn" href="/bids/songwon-page">전체 공고 보기</a>
             <a class="top-btn" href="/bids/songwon-page?region=전국">전국 공고 보기</a>
-            <a class="top-btn" href="/bids/songwon-page?region=서울">서울 공고 보기</a>
-            <a class="top-btn" href="/bids/songwon-page?region=경기">경기 공고 보기</a>
-            <a class="top-btn" href="/bids/songwon-page?region=충북">충북 공고 보기</a>
-            <a class="top-btn" href="/bids/songwon-page?region=충남">충남 공고 보기</a>
-            <a class="top-btn" href="/bids/songwon-page?region=충청권">충청권 공고 보기</a>
             <a class="top-btn" href="/bids/songwon-page?region=경남">경남 공고 보기</a>
-            <a class="top-btn" href="/bids/songwon-test">JSON 테스트</a>
+            <a class="top-btn" href="/company/profile">회사 프로필 등록</a>
+            <a class="top-btn" href="/company/profile-data" target="_blank">프로필 JSON 확인</a>
         </div>
     </div>
 
     <div class="card">
-        <h3>송원건설 정보</h3>
-        <p class="notice">
-            회사명: 주식회사 송원건설<br>
-            주소: 경상남도 김해시 삼문로19, 1205호<br>
-            전화: 055-339-4763 / 팩스: 055-339-4764<br>
-            이메일: songwon4763@naver.com
-        </p>
+        <h3>현재 저장된 회사 프로필</h3>
+        <div class="profile-box">
+            <strong>회사명:</strong> {h(profile.get("company_name"))}<br>
+            <strong>주소:</strong> {h(profile.get("address"))}<br>
+            <strong>전화:</strong> {h(profile.get("phone"))}<br>
+            <strong>팩스:</strong> {h(profile.get("fax"))}<br>
+            <strong>이메일:</strong> {h(profile.get("email"))}<br>
+            <strong>주 활동지역:</strong> {h(profile.get("main_region"))}<br>
+            <strong>가능지역:</strong> {h(", ".join(profile.get("possible_regions", [])))}<br>
+            <strong>보유 면허:</strong> {h(", ".join(profile.get("licenses", [])) if profile.get("licenses") else "아직 선택 안 함")}<br>
+            <strong>주력 키워드:</strong> {h(profile.get("keyword_text"))}
+        </div>
     </div>
     """
 
@@ -1092,6 +1277,183 @@ def home():
         "건설회사 전용 나라장터 공고 웹플랫폼",
         body,
     )
+
+
+@app.get("/company/profile", response_class=HTMLResponse)
+def company_profile_page():
+    profile = load_company_profile()
+
+    possible_region_options = [
+        "전국", "서울", "경기", "인천", "부산", "대구", "광주", "대전", "울산", "세종",
+        "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주",
+        "수도권", "충청권", "전라권", "경상권",
+    ]
+
+    body = f"""
+    <div class="card">
+        <div class="summary">
+            <span class="badge">회사 프로필 등록</span>
+            <span class="badge">로그인 기능 전 임시 저장 방식</span>
+            <a class="top-btn" href="/">첫 화면</a>
+            <a class="top-btn" href="/bids/songwon-page">전체 공고 보기</a>
+        </div>
+    </div>
+
+    <form action="/company/profile-save" method="get">
+        <div class="card">
+            <h3>기본 정보</h3>
+
+            <div class="form-grid">
+                <div class="form-row">
+                    <label>회사명</label>
+                    <input type="text" name="company_name" value="{h(profile.get("company_name"))}">
+                </div>
+
+                <div class="form-row">
+                    <label>담당자명</label>
+                    <input type="text" name="manager_name" value="{h(profile.get("manager_name"))}" placeholder="예: 홍길동">
+                </div>
+
+                <div class="form-row">
+                    <label>전화번호</label>
+                    <input type="text" name="phone" value="{h(profile.get("phone"))}">
+                </div>
+
+                <div class="form-row">
+                    <label>팩스</label>
+                    <input type="text" name="fax" value="{h(profile.get("fax"))}">
+                </div>
+
+                <div class="form-row">
+                    <label>이메일</label>
+                    <input type="email" name="email" value="{h(profile.get("email"))}">
+                </div>
+
+                <div class="form-row">
+                    <label>주 활동지역</label>
+                    <select name="main_region">
+                        {''.join([f'<option value="{h(region)}" {"selected" if region == profile.get("main_region") else ""}>{h(region)}</option>' for region in possible_region_options])}
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <label>주소</label>
+                <input type="text" name="address" value="{h(profile.get("address"))}">
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>입찰 가능지역</h3>
+            <p class="notice">
+                회사가 실제로 입찰 검토할 지역을 체크하세요.<br>
+                예: 경남 업체라도 부산, 울산, 경북, 전국 공고까지 같이 볼 수 있습니다.
+            </p>
+            {render_checkbox_group("possible_regions", possible_region_options, profile.get("possible_regions", []))}
+        </div>
+
+        <div class="card">
+            <h3>보유 건설업 면허</h3>
+            <p class="notice">
+                나중에 이 면허를 기준으로 “내 회사 맞춤 공고”만 자동으로 보여주게 만들 예정입니다.
+            </p>
+            {render_checkbox_group("licenses", LICENSE_OPTIONS, profile.get("licenses", []))}
+        </div>
+
+        <div class="card">
+            <h3>주력 검색 키워드</h3>
+            <p class="notice">
+                쉼표로 구분해서 입력하세요. 비워두면 기본 송원 키워드를 사용합니다.
+            </p>
+
+            <div class="form-row">
+                <label>키워드</label>
+                <textarea name="keyword_text">{h(profile.get("keyword_text"))}</textarea>
+            </div>
+
+            <button type="submit">회사 프로필 저장</button>
+            <a class="top-btn" href="/">취소하고 첫 화면</a>
+        </div>
+    </form>
+    """
+
+    return page_layout(
+        "회사 프로필 등록",
+        "회사 정보와 보유 면허를 저장하는 화면입니다",
+        body,
+    )
+
+
+@app.get("/company/profile-save", response_class=HTMLResponse)
+def company_profile_save(
+    company_name: str = Query(""),
+    manager_name: str = Query(""),
+    address: str = Query(""),
+    phone: str = Query(""),
+    fax: str = Query(""),
+    email: str = Query(""),
+    main_region: str = Query("경남"),
+    possible_regions: List[str] = Query(default=[]),
+    licenses: List[str] = Query(default=[]),
+    keyword_text: str = Query(""),
+):
+    profile = {
+        "company_name": company_name.strip(),
+        "manager_name": manager_name.strip(),
+        "address": address.strip(),
+        "phone": phone.strip(),
+        "fax": fax.strip(),
+        "email": email.strip(),
+        "main_region": main_region.strip(),
+        "possible_regions": possible_regions,
+        "licenses": licenses,
+        "keyword_text": keyword_text.strip(),
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+    save_company_profile(profile)
+
+    body = f"""
+    <div class="card">
+        <h2>회사 프로필 저장 완료</h2>
+        <p class="notice">
+            회사 프로필이 저장되었습니다.<br>
+            다음 단계에서 이 프로필의 보유 면허와 가능지역을 기준으로 맞춤 공고를 보여주도록 연결하면 됩니다.
+        </p>
+
+        <div class="profile-box">
+            <strong>회사명:</strong> {h(profile.get("company_name"))}<br>
+            <strong>담당자:</strong> {h(profile.get("manager_name"))}<br>
+            <strong>주소:</strong> {h(profile.get("address"))}<br>
+            <strong>전화:</strong> {h(profile.get("phone"))}<br>
+            <strong>팩스:</strong> {h(profile.get("fax"))}<br>
+            <strong>이메일:</strong> {h(profile.get("email"))}<br>
+            <strong>주 활동지역:</strong> {h(profile.get("main_region"))}<br>
+            <strong>가능지역:</strong> {h(", ".join(profile.get("possible_regions", [])))}<br>
+            <strong>보유 면허:</strong> {h(", ".join(profile.get("licenses", [])) if profile.get("licenses") else "선택 안 함")}<br>
+            <strong>주력 키워드:</strong> {h(profile.get("keyword_text"))}<br>
+            <strong>저장시간:</strong> {h(profile.get("updated_at"))}
+        </div>
+
+        <div class="menu">
+            <a class="top-btn" href="/">첫 화면</a>
+            <a class="top-btn" href="/company/profile">다시 수정하기</a>
+            <a class="top-btn" href="/company/profile-data" target="_blank">JSON 확인</a>
+            <a class="top-btn" href="/bids/songwon-page">공고 보기</a>
+        </div>
+    </div>
+    """
+
+    return page_layout(
+        "회사 프로필 저장 완료",
+        "저장된 회사 정보를 확인하세요",
+        body,
+    )
+
+
+@app.get("/company/profile-data")
+def company_profile_data():
+    return JSONResponse(load_company_profile())
 
 
 @app.get("/bids/nara")
@@ -1181,9 +1543,13 @@ def songwon_test(
     region: str = Query("전체"),
     days_forward: int = Query(30),
 ):
+    profile = load_company_profile()
+    keyword_text = profile.get("keyword_text", "")
+    keywords = split_keywords(keyword_text)
+
     return JSONResponse(
         search_bids_by_keywords(
-            keywords=SONGWON_KEYWORDS,
+            keywords=keywords,
             region=region,
             exclude_closed=True,
             days_forward=days_forward,
@@ -1196,10 +1562,17 @@ def songwon_test(
 @app.get("/bids/songwon-page", response_class=HTMLResponse)
 def songwon_page(
     region: str = Query("전체"),
-    keyword: str = Query("", description="비워두면 송원 주력 키워드 전체 검색"),
+    keyword: str = Query("", description="비워두면 회사 프로필 키워드 전체 검색"),
     days_forward: int = Query(30),
 ):
-    keywords = [keyword.strip()] if keyword.strip() else SONGWON_KEYWORDS
+    profile = load_company_profile()
+
+    if keyword.strip():
+        keywords = [keyword.strip()]
+        keyword_label = keyword.strip()
+    else:
+        keywords = split_keywords(profile.get("keyword_text", ""))
+        keyword_label = "회사 프로필 주력 키워드"
 
     result = search_bids_by_keywords(
         keywords=keywords,
@@ -1222,8 +1595,6 @@ def songwon_page(
         </div>
         """
 
-    keyword_label = keyword.strip() if keyword.strip() else "송원 주력 키워드 15개 전체"
-
     body = f"""
     <div class="card">
         <div class="summary">
@@ -1232,11 +1603,12 @@ def songwon_page(
             <span class="badge">공고 수: {h(result.get("count"))}개</span>
             <span class="badge">마감 지난 공고 제외</span>
             <a class="top-btn" href="/">첫 화면</a>
+            <a class="top-btn" href="/company/profile">회사 프로필</a>
             <a class="top-btn" href="/bids/songwon-test?region={quote(region)}" target="_blank">JSON 보기</a>
         </div>
 
         <form class="search-form" action="/bids/songwon-page" method="get">
-            <input type="text" name="keyword" value="{h(keyword)}" placeholder="공고명 검색 예: 포장, 배수로, 도로 / 비우면 전체검색">
+            <input type="text" name="keyword" value="{h(keyword)}" placeholder="공고명 검색 예: 포장, 배수로, 도로 / 비우면 회사 프로필 키워드">
             <input type="hidden" name="region" value="{h(region)}">
             <button type="submit">공고명 검색</button>
             <a class="top-btn" href="/bids/songwon-page?region={quote(region)}">검색 초기화</a>
@@ -1248,9 +1620,7 @@ def songwon_page(
         <p class="notice">
             전체는 지역 상관없이 모든 공고를 보여줍니다.<br>
             전국은 지역제한 없음 문구가 있거나 금액이 100억 이상인 공고를 보여줍니다.<br>
-            서울, 경기, 인천, 부산, 대구, 광주, 대전, 울산, 세종, 강원,
-            충북, 충남, 전북, 전남, 경북, 경남, 제주까지 볼 수 있습니다.<br>
-            수도권, 충청권, 전라권, 경상권 묶음 버튼도 같이 넣었습니다.
+            회사 프로필 화면에서 주력 키워드와 면허를 등록할 수 있습니다.
         </p>
 
         <div class="menu">
@@ -1267,6 +1637,6 @@ def songwon_page(
 
     return page_layout(
         "송원건설 전체 공고 검색",
-        "지역별 필터 + 전국 100억 이상 필터 버전",
+        "회사 프로필 등록 화면 추가 버전",
         body,
     )
