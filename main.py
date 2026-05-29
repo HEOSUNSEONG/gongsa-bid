@@ -11,7 +11,7 @@ from typing import List
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
-app = FastAPI(title="gongsa-bid", version="my-bids-license-strict-1.0.0")
+app = FastAPI(title="gongsa-bid", version="my-bids-siping-filter-1.0.0")
 
 
 DATA_GO_KR_SERVICE_KEY = os.getenv("DATA_GO_KR_SERVICE_KEY", "").strip()
@@ -1277,6 +1277,44 @@ def get_profile_specialty_reason(item: dict, profile: dict) -> str:
     return "-"
 
 
+
+
+def match_profile_siping(item: dict, profile: dict) -> bool:
+    """
+    시공능력평가액이 입력되어 있으면,
+    공고 금액이 시평액보다 큰 공고는 내 회사 맞춤 공고에서 제외합니다.
+
+    단, 나라장터 API에서 금액을 못 읽은 공고는 일단 포함합니다.
+    """
+    profile_limit = int(profile.get("siping_amount") or 0)
+
+    if profile_limit <= 0:
+        return True
+
+    bid_amount = get_bid_amount(item)
+
+    if bid_amount <= 0:
+        return True
+
+    return bid_amount <= profile_limit
+
+
+def get_profile_siping_reason(item: dict, profile: dict) -> str:
+    profile_limit = int(profile.get("siping_amount") or 0)
+    bid_amount = get_bid_amount(item)
+
+    if profile_limit <= 0:
+        return "시평액 미입력"
+
+    if bid_amount <= 0:
+        return "공고 금액 정보 없음"
+
+    if bid_amount <= profile_limit:
+        return f"시평액 이내: {format_money(bid_amount)} / {format_money(profile_limit)}"
+
+    return f"시평액 초과: {format_money(bid_amount)} / {format_money(profile_limit)}"
+
+
 def search_bids_for_profile(
     profile: dict,
     exclude_closed: bool = True,
@@ -1313,10 +1351,15 @@ def search_bids_for_profile(
                 if not match_profile_specialty(item, profile):
                     continue
 
+                if not match_profile_siping(item, profile):
+                    continue
+
                 bid = simplify_bid(item, keyword=keyword)
                 matched_regions = get_profile_matched_regions(item, profile_regions)
                 bid["profile_match_region_label"] = ", ".join(matched_regions) if matched_regions else "-"
-                bid["profile_match_reason"] = get_profile_specialty_reason(item, profile)
+                specialty_reason = get_profile_specialty_reason(item, profile)
+                siping_reason = get_profile_siping_reason(item, profile)
+                bid["profile_match_reason"] = f"{specialty_reason} / {siping_reason}" if specialty_reason != "-" else siping_reason
                 all_items.append(bid)
 
     deduped = []
@@ -1905,7 +1948,7 @@ def health():
     return {
         "status": "ok",
         "service": "gongsa-bid",
-        "version": "my-bids-license-strict-1.0.0",
+        "version": "my-bids-siping-filter-1.0.0",
         "has_DATA_GO_KR_SERVICE_KEY": bool(DATA_GO_KR_SERVICE_KEY),
     }
 
@@ -2279,9 +2322,9 @@ def my_bids_page(
     <div class="card">
         <h3>맞춤 공고 기준</h3>
         <p class="notice">
-            회사 프로필의 <strong>입찰 가능지역 + 보유 면허 + 주력 공종 + 자재납품 품목</strong>을 기준으로 공고를 걸러봅니다.<br>
+            회사 프로필의 <strong>입찰 가능지역 + 보유 면허 + 주력 공종 + 자재납품 품목 + 시공능력평가액</strong>을 기준으로 공고를 걸러봅니다.<br>
             전기공사, 건축공사처럼 회사 프로필에 없는 면허/공종은 내 회사 맞춤 공고에서 제외합니다.<br>
-            다음 단계에서 시공능력평가액 기준까지 더 정확하게 연결할 예정입니다.
+            시공능력평가액이 입력되어 있으면 공고 금액이 시평액보다 큰 공고는 제외합니다.
         </p>
 
         <div class="profile-box">
@@ -2303,7 +2346,7 @@ def my_bids_page(
 
     return page_layout(
         "내 회사 맞춤 공고",
-        "회사 프로필의 입찰 가능지역, 보유 면허, 주력 공종을 기준으로 공고를 보여줍니다",
+        "회사 프로필의 입찰 가능지역, 보유 면허, 주력 공종, 시공능력평가액을 기준으로 공고를 보여줍니다",
         body,
     )
 
