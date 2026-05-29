@@ -11,7 +11,7 @@ from typing import List
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
-app = FastAPI(title="gongsa-bid", version="money-comma-won-1.0.0")
+app = FastAPI(title="gongsa-bid", version="my-bids-license-strict-1.0.0")
 
 
 DATA_GO_KR_SERVICE_KEY = os.getenv("DATA_GO_KR_SERVICE_KEY", "").strip()
@@ -523,6 +523,36 @@ MATERIAL_KEYWORDS = {
     "가드레일": ["가드레일"],
     "휀스": ["휀스", "펜스"],
     "기타 건설자재": ["자재", "납품", "구매"],
+}
+
+
+# 내 회사 맞춤 공고에서 제외할 수 있는 큰 분류 키워드
+# 회사 프로필에 해당 면허/공종이 없으면 아래 키워드가 강하게 잡히는 공고는 제외합니다.
+PROFILE_EXCLUDE_RULES = {
+    "전기": {
+        "profile_terms": ["전기공", "전기", "전기공사업"],
+        "bid_terms": ["전기공사", "전기 공사", "전기설비", "전력", "배전", "수전", "분전반", "가로등", "보안등", "조명공사"],
+    },
+    "건축": {
+        "profile_terms": ["건축공사업", "토목건축공사업", "건축공", "신축", "증축", "대수선", "리모델링", "실내건축"],
+        "bid_terms": ["건축공사", "건축 공사", "신축", "증축", "대수선", "리모델링", "인테리어", "실내건축", "내장공사"],
+    },
+    "통신": {
+        "profile_terms": ["통신공", "정보통신", "CCTV"],
+        "bid_terms": ["통신공사", "정보통신", "CCTV", "방송설비", "네트워크"],
+    },
+    "소방": {
+        "profile_terms": ["소방설비"],
+        "bid_terms": ["소방공사", "소방설비", "화재감지", "스프링클러"],
+    },
+    "기계설비": {
+        "profile_terms": ["기계설비·가스공사업", "기계설비공사", "기계설비", "냉난방", "공조", "위생설비", "펌프설비", "배관공"],
+        "bid_terms": ["기계설비", "냉난방", "공조", "위생설비", "펌프", "보일러", "배관공사"],
+    },
+    "조경": {
+        "profile_terms": ["조경공사업", "조경식재·시설물공사업", "조경공", "조경식재", "조경시설물", "공원시설", "잔디식재", "수목식재"],
+        "bid_terms": ["조경공사", "조경 식재", "수목", "잔디", "공원시설", "식재공사"],
+    },
 }
 
 AMOUNT_KEYS = [
@@ -1149,6 +1179,104 @@ def get_profile_matched_regions(item: dict, profile_regions: list) -> list:
     return matched
 
 
+def profile_selected_terms(profile: dict) -> list:
+    terms = []
+    terms.extend(profile.get("licenses", []) or [])
+    terms.extend(profile.get("work_types", []) or [])
+    terms.extend(profile.get("material_supplies", []) or [])
+    return terms
+
+
+def profile_has_any_term(profile: dict, terms: list) -> bool:
+    selected_text = " ".join(profile_selected_terms(profile))
+    return any(term in selected_text for term in terms)
+
+
+def bid_has_any_term(item: dict, terms: list) -> bool:
+    text = make_search_text(item)
+    return any(term in text for term in terms)
+
+
+def get_profile_exclude_reason(item: dict, profile: dict) -> str:
+    for group_name, rule in PROFILE_EXCLUDE_RULES.items():
+        if bid_has_any_term(item, rule.get("bid_terms", [])):
+            if not profile_has_any_term(profile, rule.get("profile_terms", [])):
+                return f"{group_name} 관련 공고 - 회사 프로필에 해당 면허/공종 없음"
+    return ""
+
+
+def match_profile_specialty(item: dict, profile: dict) -> bool:
+    selected_licenses = set(profile.get("licenses", []) or [])
+    selected_work_types = set(profile.get("work_types", []) or [])
+    selected_materials = set(profile.get("material_supplies", []) or [])
+
+    if not selected_licenses and not selected_work_types and not selected_materials:
+        return True
+
+    if get_profile_exclude_reason(item, profile):
+        return False
+
+    inferred_licenses = set(infer_licenses(item))
+    inferred_work_types = set(infer_work_types(item))
+    inferred_materials = set(infer_materials(item))
+
+    if selected_licenses and inferred_licenses.intersection(selected_licenses):
+        return True
+
+    if selected_work_types and inferred_work_types.intersection(selected_work_types):
+        return True
+
+    if selected_materials and inferred_materials.intersection(selected_materials):
+        return True
+
+    text = make_search_text(item)
+    for keyword in split_keywords(profile.get("keyword_text", "")):
+        if keyword and keyword in text:
+            return True
+
+    return False
+
+
+def get_profile_specialty_reason(item: dict, profile: dict) -> str:
+    exclude_reason = get_profile_exclude_reason(item, profile)
+    if exclude_reason:
+        return exclude_reason
+
+    selected_licenses = set(profile.get("licenses", []) or [])
+    selected_work_types = set(profile.get("work_types", []) or [])
+    selected_materials = set(profile.get("material_supplies", []) or [])
+
+    inferred_licenses = set(infer_licenses(item))
+    inferred_work_types = set(infer_work_types(item))
+    inferred_materials = set(infer_materials(item))
+
+    matched = []
+
+    license_match = inferred_licenses.intersection(selected_licenses)
+    work_match = inferred_work_types.intersection(selected_work_types)
+    material_match = inferred_materials.intersection(selected_materials)
+
+    if license_match:
+        matched.append("면허: " + ", ".join(sorted(license_match)))
+
+    if work_match:
+        matched.append("공종: " + ", ".join(sorted(work_match)))
+
+    if material_match:
+        matched.append("자재: " + ", ".join(sorted(material_match)))
+
+    if matched:
+        return " / ".join(matched)
+
+    text = make_search_text(item)
+    keyword_match = [kw for kw in split_keywords(profile.get("keyword_text", "")) if kw and kw in text]
+
+    if keyword_match:
+        return "키워드: " + ", ".join(keyword_match[:5])
+
+    return "-"
+
+
 def search_bids_for_profile(
     profile: dict,
     exclude_closed: bool = True,
@@ -1182,9 +1310,13 @@ def search_bids_for_profile(
                 if not match_profile_regions(item, profile_regions):
                     continue
 
+                if not match_profile_specialty(item, profile):
+                    continue
+
                 bid = simplify_bid(item, keyword=keyword)
                 matched_regions = get_profile_matched_regions(item, profile_regions)
                 bid["profile_match_region_label"] = ", ".join(matched_regions) if matched_regions else "-"
+                bid["profile_match_reason"] = get_profile_specialty_reason(item, profile)
                 all_items.append(bid)
 
     deduped = []
@@ -1403,6 +1535,7 @@ def render_bid_table(bids: list) -> str:
                 <td>{h(bid.get("license_label"))}</td>
                 <td>{h(bid.get("work_type_label"))}</td>
                 <td>{h(bid.get("material_label"))}</td>
+                <td>{h(bid.get("profile_match_reason", "-"))}</td>
                 <td>{h(bid.get("region_label"))}</td>
                 <td>{h(bid.get("amount_label"))}</td>
                 <td>{h(nationwide_reason)}</td>
@@ -1428,6 +1561,7 @@ def render_bid_table(bids: list) -> str:
                     <th>면허 추정</th>
                     <th>공종 추정</th>
                     <th>자재 추정</th>
+                    <th>맞춤 사유</th>
                     <th>지역</th>
                     <th>금액</th>
                     <th>전국 사유</th>
@@ -1771,7 +1905,7 @@ def health():
     return {
         "status": "ok",
         "service": "gongsa-bid",
-        "version": "money-comma-won-1.0.0",
+        "version": "my-bids-license-strict-1.0.0",
         "has_DATA_GO_KR_SERVICE_KEY": bool(DATA_GO_KR_SERVICE_KEY),
     }
 
@@ -2145,9 +2279,9 @@ def my_bids_page(
     <div class="card">
         <h3>맞춤 공고 기준</h3>
         <p class="notice">
-            현재는 회사 프로필의 <strong>입찰 가능지역</strong>과 <strong>주력 키워드</strong>를 기준으로 공고를 걸러봅니다.<br>
-            예: 전국, 경상남도, 김해시, 창녕군을 저장하면 그 지역에 해당하는 공고를 함께 보여줍니다.<br>
-            다음 단계에서 보유 면허, 주력 공종, 시공능력평가액 기준까지 더 정확하게 연결할 예정입니다.
+            회사 프로필의 <strong>입찰 가능지역 + 보유 면허 + 주력 공종 + 자재납품 품목</strong>을 기준으로 공고를 걸러봅니다.<br>
+            전기공사, 건축공사처럼 회사 프로필에 없는 면허/공종은 내 회사 맞춤 공고에서 제외합니다.<br>
+            다음 단계에서 시공능력평가액 기준까지 더 정확하게 연결할 예정입니다.
         </p>
 
         <div class="profile-box">
@@ -2169,7 +2303,7 @@ def my_bids_page(
 
     return page_layout(
         "내 회사 맞춤 공고",
-        "회사 프로필의 입찰 가능지역과 키워드를 기준으로 공고를 보여줍니다",
+        "회사 프로필의 입찰 가능지역, 보유 면허, 주력 공종을 기준으로 공고를 보여줍니다",
         body,
     )
 
