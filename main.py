@@ -11,7 +11,7 @@ from typing import List
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
-app = FastAPI(title="gongsa-bid", version="my-bids-profile-match-1.0.0")
+app = FastAPI(title="gongsa-bid", version="money-comma-won-1.0.0")
 
 
 DATA_GO_KR_SERVICE_KEY = os.getenv("DATA_GO_KR_SERVICE_KEY", "").strip()
@@ -627,12 +627,17 @@ def parse_profile_amount(value) -> int:
 
 
 def format_money(amount: int) -> str:
+    """
+    금액을 100,000,000원 형식으로 표시합니다.
+    억 단위로 줄이지 않고 원 단위 콤마 표시를 사용합니다.
+    """
     if not amount:
         return "-"
 
-    if amount >= 100_000_000:
-        eok = amount / 100_000_000
-        return f"{eok:,.1f}억"
+    try:
+        amount = int(amount)
+    except Exception:
+        return "-"
 
     return f"{amount:,}원"
 
@@ -1766,7 +1771,7 @@ def health():
     return {
         "status": "ok",
         "service": "gongsa-bid",
-        "version": "my-bids-profile-match-1.0.0",
+        "version": "money-comma-won-1.0.0",
         "has_DATA_GO_KR_SERVICE_KEY": bool(DATA_GO_KR_SERVICE_KEY),
     }
 
@@ -1823,7 +1828,7 @@ def home():
             <strong>이메일:</strong> {h(profile.get("email"))}<br>
             <strong>주 활동지역:</strong> {h(region_display_name(profile.get("main_region")))}<br>
             <strong>입찰 가능지역:</strong> {h(format_region_list(profile.get("possible_regions", [])))}<br>
-            <strong>시공능력평가액:</strong> {h(profile.get("siping_amount_text") or format_money(profile.get("siping_amount", 0)))}<br>
+            <strong>시공능력평가액:</strong> {h(format_money(profile.get("siping_amount", 0)))}<br>
             <strong>보유 면허:</strong> {h(", ".join(profile.get("licenses", [])) if profile.get("licenses") else "아직 선택 안 함")}<br>
             <strong>주력 공종:</strong> {h(", ".join(profile.get("work_types", [])) if profile.get("work_types") else "아직 선택 안 함")}<br>
             <strong>자재납품 품목:</strong> {h(", ".join(profile.get("material_supplies", [])) if profile.get("material_supplies") else "아직 선택 안 함")}<br>
@@ -2004,7 +2009,7 @@ def company_profile_save(
             <strong>이메일:</strong> {h(profile.get("email"))}<br>
             <strong>주 활동지역:</strong> {h(region_display_name(profile.get("main_region")))}<br>
             <strong>입찰 가능지역:</strong> {h(format_region_list(profile.get("possible_regions", [])))}<br>
-            <strong>시공능력평가액:</strong> {h(profile.get("siping_amount_text") or format_money(profile.get("siping_amount", 0)))}<br>
+            <strong>시공능력평가액:</strong> {h(format_money(profile.get("siping_amount", 0)))}<br>
             <strong>보유 면허:</strong> {h(", ".join(profile.get("licenses", [])) if profile.get("licenses") else "선택 안 함")}<br>
             <strong>주력 공종:</strong> {h(", ".join(profile.get("work_types", [])) if profile.get("work_types") else "선택 안 함")}<br>
             <strong>자재납품 품목:</strong> {h(", ".join(profile.get("material_supplies", [])) if profile.get("material_supplies") else "선택 안 함")}<br>
@@ -2148,7 +2153,7 @@ def my_bids_page(
         <div class="profile-box">
             <strong>회사명:</strong> {h(profile.get("company_name"))}<br>
             <strong>입찰 가능지역:</strong> {h(format_region_list(profile.get("possible_regions", [])))}<br>
-            <strong>시공능력평가액:</strong> {h(profile.get("siping_amount_text") or format_money(profile.get("siping_amount", 0)))}<br>
+            <strong>시공능력평가액:</strong> {h(format_money(profile.get("siping_amount", 0)))}<br>
             <strong>보유 면허:</strong> {h(", ".join(profile.get("licenses", [])) if profile.get("licenses") else "선택 안 함")}<br>
             <strong>주력 공종:</strong> {h(", ".join(profile.get("work_types", [])) if profile.get("work_types") else "선택 안 함")}<br>
             <strong>주력 키워드:</strong> {h(profile.get("keyword_text"))}
