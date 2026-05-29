@@ -11,7 +11,7 @@ from typing import List
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
-app = FastAPI(title="gongsa-bid", version="my-bids-siping-filter-1.0.0")
+app = FastAPI(title="gongsa-bid", version="profile-examples-not-saved-1.0.0")
 
 
 DATA_GO_KR_SERVICE_KEY = os.getenv("DATA_GO_KR_SERVICE_KEY", "").strip()
@@ -1159,8 +1159,10 @@ def search_bids_by_keywords(
 
 
 def match_profile_regions(item: dict, profile_regions: list) -> bool:
+    # 입찰 가능지역을 선택하지 않았으면 내 회사 맞춤 공고에는 표시하지 않습니다.
+    # 먼저 회사 프로필에서 지역을 선택하게 하기 위함입니다.
     if not profile_regions:
-        return True
+        return False
 
     for region in profile_regions:
         if match_region(item, region):
@@ -1412,22 +1414,14 @@ def default_company_profile() -> dict:
         "phone": "055-339-4763",
         "fax": "055-339-4764",
         "email": "songwon4763@naver.com",
-        "main_region": "경상남도/전체",
-        "possible_regions": [
-            "전국",
-            "경상남도/전체",
-            "경상남도/김해시",
-            "경상남도/창녕군",
-            "부산광역시/전체",
-            "울산광역시/전체",
-            "경상북도/전체",
-        ],
+        "main_region": "",
+        "possible_regions": [],
         "siping_amount_text": "",
         "siping_amount": 0,
         "licenses": [],
         "work_types": [],
         "material_supplies": [],
-        "keyword_text": "포장, 배수, 배수로, 상하수도, 관로, 도로, 하천, 소하천, 옹벽, 측구, 맨홀, 농로, 재해복구, 정비, 보수",
+        "keyword_text": "",
         "updated_at": "",
     }
 
@@ -1454,6 +1448,9 @@ def save_company_profile(profile: dict) -> None:
 
 
 def split_keywords(keyword_text: str) -> list:
+    # 주력 키워드 입력칸은 저장하지 않아도 됩니다.
+    # 비어 있으면 화면/JSON에는 빈 값으로 두고,
+    # 공고 검색할 때만 내부 기본 키워드를 임시로 사용합니다.
     if not keyword_text:
         return SONGWON_KEYWORDS
 
@@ -1474,6 +1471,9 @@ def split_keywords(keyword_text: str) -> list:
 
 def render_region_select_options(selected: str) -> str:
     html_parts = []
+
+    placeholder_selected = "selected" if not selected else ""
+    html_parts.append(f'<option value="" {placeholder_selected}>예: 경상남도</option>')
 
     for group in PROFILE_REGION_GROUPS:
         html_parts.append(f'<optgroup label="{h(group["title"])}">')
@@ -1948,7 +1948,7 @@ def health():
     return {
         "status": "ok",
         "service": "gongsa-bid",
-        "version": "my-bids-siping-filter-1.0.0",
+        "version": "profile-examples-not-saved-1.0.0",
         "has_DATA_GO_KR_SERVICE_KEY": bool(DATA_GO_KR_SERVICE_KEY),
     }
 
@@ -2003,13 +2003,13 @@ def home():
             <strong>전화:</strong> {h(profile.get("phone"))}<br>
             <strong>팩스:</strong> {h(profile.get("fax"))}<br>
             <strong>이메일:</strong> {h(profile.get("email"))}<br>
-            <strong>주 활동지역:</strong> {h(region_display_name(profile.get("main_region")))}<br>
-            <strong>입찰 가능지역:</strong> {h(format_region_list(profile.get("possible_regions", [])))}<br>
+            <strong>주 활동지역:</strong> {h(region_display_name(profile.get("main_region")) or "선택 안 함")}<br>
+            <strong>입찰 가능지역:</strong> {h(format_region_list(profile.get("possible_regions", [])) or "선택 안 함")}<br>
             <strong>시공능력평가액:</strong> {h(format_money(profile.get("siping_amount", 0)))}<br>
             <strong>보유 면허:</strong> {h(", ".join(profile.get("licenses", [])) if profile.get("licenses") else "아직 선택 안 함")}<br>
             <strong>주력 공종:</strong> {h(", ".join(profile.get("work_types", [])) if profile.get("work_types") else "아직 선택 안 함")}<br>
             <strong>자재납품 품목:</strong> {h(", ".join(profile.get("material_supplies", [])) if profile.get("material_supplies") else "아직 선택 안 함")}<br>
-            <strong>주력 키워드:</strong> {h(profile.get("keyword_text"))}
+            <strong>주력 키워드:</strong> {h(profile.get("keyword_text") or "입력 안 함")}
         </div>
     </div>
     """
@@ -2084,7 +2084,7 @@ def company_profile_page():
         <div class="card">
             <h3>입찰 가능지역</h3>
             <p class="notice">
-                전국, 경상남도, 김해시, 창녕군처럼 깔끔하게 보이지만 내부 저장은 정확히 구분됩니다.
+                예: 전국, 경상남도, 김해시, 창녕군처럼 선택할 수 있습니다. 처음에는 아무 지역도 저장하지 않습니다.
             </p>
             {render_region_checkbox_group("possible_regions", profile.get("possible_regions", []))}
         </div>
@@ -2118,10 +2118,10 @@ def company_profile_page():
 
         <div class="card">
             <h3>주력 검색 키워드</h3>
-            <p class="notice">쉼표로 구분해서 입력하세요. 비워두면 기본 송원 키워드를 사용합니다.</p>
+            <p class="notice">필요할 때만 입력하세요. 비워두면 저장되지 않고, 예시는 입력칸 안내문으로만 표시됩니다.</p>
             <div class="form-row">
                 <label>키워드</label>
-                <textarea name="keyword_text">{h(profile.get("keyword_text"))}</textarea>
+                <textarea name="keyword_text" placeholder="예: 포장, 배수로, 상하수도, 관로, 도로">{h(profile.get("keyword_text", ""))}</textarea>
             </div>
 
             <button type="submit">회사 프로필 저장</button>
@@ -2141,7 +2141,7 @@ def company_profile_save(
     phone: str = Query(""),
     fax: str = Query(""),
     email: str = Query(""),
-    main_region: str = Query("경상남도/전체"),
+    main_region: str = Query(""),
     possible_regions: List[str] = Query(default=[]),
     siping_amount_text: str = Query(""),
     licenses: List[str] = Query(default=[]),
@@ -2184,13 +2184,13 @@ def company_profile_save(
             <strong>전화:</strong> {h(profile.get("phone"))}<br>
             <strong>팩스:</strong> {h(profile.get("fax"))}<br>
             <strong>이메일:</strong> {h(profile.get("email"))}<br>
-            <strong>주 활동지역:</strong> {h(region_display_name(profile.get("main_region")))}<br>
-            <strong>입찰 가능지역:</strong> {h(format_region_list(profile.get("possible_regions", [])))}<br>
+            <strong>주 활동지역:</strong> {h(region_display_name(profile.get("main_region")) or "선택 안 함")}<br>
+            <strong>입찰 가능지역:</strong> {h(format_region_list(profile.get("possible_regions", [])) or "선택 안 함")}<br>
             <strong>시공능력평가액:</strong> {h(format_money(profile.get("siping_amount", 0)))}<br>
             <strong>보유 면허:</strong> {h(", ".join(profile.get("licenses", [])) if profile.get("licenses") else "선택 안 함")}<br>
             <strong>주력 공종:</strong> {h(", ".join(profile.get("work_types", [])) if profile.get("work_types") else "선택 안 함")}<br>
             <strong>자재납품 품목:</strong> {h(", ".join(profile.get("material_supplies", [])) if profile.get("material_supplies") else "선택 안 함")}<br>
-            <strong>주력 키워드:</strong> {h(profile.get("keyword_text"))}<br>
+            <strong>주력 키워드:</strong> {h(profile.get("keyword_text") or "입력 안 함")}<br>
             <strong>저장시간:</strong> {h(profile.get("updated_at"))}
         </div>
 
@@ -2329,11 +2329,11 @@ def my_bids_page(
 
         <div class="profile-box">
             <strong>회사명:</strong> {h(profile.get("company_name"))}<br>
-            <strong>입찰 가능지역:</strong> {h(format_region_list(profile.get("possible_regions", [])))}<br>
+            <strong>입찰 가능지역:</strong> {h(format_region_list(profile.get("possible_regions", [])) or "선택 안 함")}<br>
             <strong>시공능력평가액:</strong> {h(format_money(profile.get("siping_amount", 0)))}<br>
             <strong>보유 면허:</strong> {h(", ".join(profile.get("licenses", [])) if profile.get("licenses") else "선택 안 함")}<br>
             <strong>주력 공종:</strong> {h(", ".join(profile.get("work_types", [])) if profile.get("work_types") else "선택 안 함")}<br>
-            <strong>주력 키워드:</strong> {h(profile.get("keyword_text"))}
+            <strong>주력 키워드:</strong> {h(profile.get("keyword_text") or "입력 안 함")}
         </div>
     </div>
 
@@ -2364,7 +2364,7 @@ def songwon_page(
         keyword_label = keyword.strip()
     else:
         keywords = split_keywords(profile.get("keyword_text", ""))
-        keyword_label = "회사 프로필 주력 키워드"
+        keyword_label = "기본 검색 키워드" if not profile.get("keyword_text", "").strip() else "회사 프로필 주력 키워드"
 
     result = search_bids_by_keywords(keywords, region, True, days_forward, 1, 100)
     region_buttons = render_region_buttons("/bids/songwon-page", region, keyword=keyword)
