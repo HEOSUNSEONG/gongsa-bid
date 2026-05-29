@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
-app = FastAPI(title="gongsa-bid", version="siping-missing-allowed-1.0.0")
+app = FastAPI(title="gongsa-bid", version="license-design-supervision-1.0.0")
 
 
 DATA_GO_KR_SERVICE_KEY = os.getenv("DATA_GO_KR_SERVICE_KEY", "").strip()
@@ -353,6 +353,7 @@ GENERAL_CONSTRUCTION_LICENSE_OPTIONS = [
 ]
 
 SPECIALTY_CONSTRUCTION_LICENSE_OPTIONS = [
+    # 전문건설 대업종
     "지반조성·포장공사업",
     "실내건축공사업",
     "금속·창호·지붕·건축물조립공사업",
@@ -367,11 +368,15 @@ SPECIALTY_CONSTRUCTION_LICENSE_OPTIONS = [
     "승강기·삭도공사업",
     "기계설비·가스공사업",
     "가스·난방공사업",
+
+    # 전문건설 주력분야/세부분야
     "토공사",
     "포장공사",
     "보링·그라우팅·파일공사",
+    "실내건축공사",
     "금속구조물공사",
     "창호공사",
+    "온실설치공사",
     "지붕판금·건축물조립공사",
     "도장공사",
     "습식·방수공사",
@@ -390,19 +395,191 @@ SPECIALTY_CONSTRUCTION_LICENSE_OPTIONS = [
     "승강기설치공사",
     "삭도설치공사",
     "기계설비공사",
-    "가스시설공사",
-    "난방공사",
+    "가스시설공사 제1종",
+    "가스시설공사 제2종",
+    "가스시설공사 제3종",
+    "난방공사 제1종",
+    "난방공사 제2종",
+    "난방공사 제3종",
+]
+
+OTHER_FACILITY_LICENSE_OPTIONS = [
+    # 나라장터 시설공사에서 자주 나오는 별도 등록업종
+    "전기공사업",
+    "정보통신공사업",
+    "전문소방시설공사업",
+    "일반소방시설공사업(기계)",
+    "일반소방시설공사업(전기)",
+    "소방시설관리업",
+    "승강기유지관리업",
+    "석면해체·제거업",
+    "지하수개발·이용시공업",
+    "온천공시공업",
+    "옥외광고사업",
+]
+
+ENVIRONMENT_LICENSE_OPTIONS = [
+    "대기환경전문공사업",
+    "수질환경전문공사업",
+    "소음·진동환경전문공사업",
+    "폐기물처리시설 설계·시공업",
+    "개인하수처리시설 설계·시공업",
+    "가축분뇨처리시설 설계·시공업",
+    "환경컨설팅회사",
+    "환경전문공사업",
+]
+
+WASTE_LICENSE_OPTIONS = [
+    "건설폐기물 수집·운반업",
+    "폐기물 수집·운반업",
+    "폐기물 중간처분업",
+    "폐기물 최종처분업",
+    "폐기물 종합처분업",
+    "폐기물 중간재활용업",
+    "폐기물 최종재활용업",
+    "폐기물 종합재활용업",
+    "사업장폐기물배출자 신고",
+]
+
+FOREST_LICENSE_OPTIONS = [
+    "산림사업법인(숲가꾸기 및 병해충방제)",
+    "산림사업법인(산림토목)",
+    "산림사업법인(자연휴양림 등 조성)",
+    "산림사업법인(도시숲등 조성·관리)",
+    "산림사업법인(숲길 조성·관리)",
+    "산림사업법인(산림복원)",
+    "나무병원 1종",
+    "나무병원 2종",
+    "목재생산업",
+]
+
+CULTURAL_HERITAGE_LICENSE_OPTIONS = [
+    "종합국가유산수리업(보수단청업)",
+    "종합국가유산수리업(조경업)",
+    "전문국가유산수리업(보존과학업)",
+    "전문국가유산수리업(식물보호업)",
+    "전문국가유산수리업(단청공사업)",
+    "전문국가유산수리업(목공사업)",
+    "전문국가유산수리업(석공사업)",
+    "전문국가유산수리업(번와공사업)",
+    "전문국가유산수리업(실측설계업)",
+    "문화재수리업",
+]
+
+SERVICE_TECH_LICENSE_OPTIONS = [
+    "건설엔지니어링업",
+    "엔지니어링사업자",
+    "기술사사무소",
+    "건축사사무소",
+    "일반측량업",
+    "공공측량업",
+    "측지측량업",
+    "지하시설물측량업",
+    "수치지도제작업",
+    "지도제작업",
+    "공간영상도화업",
+    "항공촬영업",
+    "해양조사·정보업",
+    "안전진단전문기관(교량 및 터널)",
+    "안전진단전문기관(수리시설)",
+    "안전진단전문기관(항만)",
+    "안전진단전문기관(건축)",
+    "안전진단전문기관(종합)",
+    "지하안전평가전문기관",
+]
+
+DESIGN_SUPERVISION_LICENSE_OPTIONS = [
+    # 건설엔지니어링 / 건설사업관리
+    "건설엔지니어링업(종합)",
+    "건설엔지니어링업(설계·사업관리)",
+    "건설엔지니어링업(품질검사)",
+    "건설사업관리용역업",
+    "감독권한대행 등 건설사업관리용역",
+    "건설공사 감리용역",
+    "건설공사 설계용역",
+
+    # 건축 설계·감리
+    "건축사사무소",
+    "건축사사무소(건축설계)",
+    "건축사사무소(공사감리)",
+    "법인건축사사무소",
+
+    # 전력시설물 설계·감리
+    "전력시설물 설계업(종합설계업)",
+    "전력시설물 설계업(전문설계업 1종)",
+    "전력시설물 설계업(전문설계업 2종)",
+    "전력시설물 감리업(종합감리업)",
+    "전력시설물 감리업(전문감리업)",
+
+    # 소방 설계·감리
+    "전문소방시설설계업",
+    "일반소방시설설계업(기계)",
+    "일반소방시설설계업(전기)",
+    "전문소방공사감리업",
+    "일반소방공사감리업(기계)",
+    "일반소방공사감리업(전기)",
+
+    # 정보통신 설계·감리/용역
+    "정보통신 설계용역",
+    "정보통신 감리용역",
+    "정보통신공사 감리용역",
+
+    # 엔지니어링사업자 세부분야
+    "엔지니어링사업자(건설부문)",
+    "엔지니어링사업자(구조)",
+    "엔지니어링사업자(토질·지질)",
+    "엔지니어링사업자(도로·공항)",
+    "엔지니어링사업자(상하수도)",
+    "엔지니어링사업자(수자원개발)",
+    "엔지니어링사업자(도시계획)",
+    "엔지니어링사업자(조경)",
+    "엔지니어링사업자(교통)",
+    "엔지니어링사업자(농어업토목)",
+    "엔지니어링사업자(전기)",
+    "엔지니어링사업자(정보통신)",
+    "엔지니어링사업자(환경)",
+    "엔지니어링사업자(소방·방재)",
+
+    # 기술사사무소 세부분야
+    "기술사사무소(건설)",
+    "기술사사무소(토목)",
+    "기술사사무소(건축)",
+    "기술사사무소(전기)",
+    "기술사사무소(정보통신)",
+    "기술사사무소(환경)",
+    "기술사사무소(소방·방재)",
+]
+
+LICENSE_GROUPS = [
+    {"title": "종합건설업", "items": GENERAL_CONSTRUCTION_LICENSE_OPTIONS},
+    {"title": "전문건설업 / 주력분야", "items": SPECIALTY_CONSTRUCTION_LICENSE_OPTIONS},
+    {"title": "전기·통신·소방·기타 시설공사", "items": OTHER_FACILITY_LICENSE_OPTIONS},
+    {"title": "환경·수질·대기·처리시설", "items": ENVIRONMENT_LICENSE_OPTIONS},
+    {"title": "폐기물·건설폐기물", "items": WASTE_LICENSE_OPTIONS},
+    {"title": "산림·나무병원", "items": FOREST_LICENSE_OPTIONS},
+    {"title": "국가유산/문화재 수리", "items": CULTURAL_HERITAGE_LICENSE_OPTIONS},
+    {"title": "측량·엔지니어링·안전진단", "items": SERVICE_TECH_LICENSE_OPTIONS},
+    {"title": "설계·감리·건설사업관리", "items": DESIGN_SUPERVISION_LICENSE_OPTIONS},
+]
+
+LICENSE_OPTIONS = [
+    item
+    for group in LICENSE_GROUPS
+    for item in group["items"]
 ]
 
 LICENSE_KEYWORDS = {
-    "토목공사업": ["토목", "도로", "하천", "교량", "상하수도", "농로", "구거"],
+    # 종합건설
+    "토목공사업": ["토목", "도로", "하천", "교량", "상하수도", "농로", "구거", "토목공사"],
     "건축공사업": ["건축공사", "건축 공사", "신축", "증축", "리모델링", "대수선"],
     "토목건축공사업": ["토목건축", "토건", "토목", "건축"],
     "산업·환경설비공사업": ["산업설비", "환경설비", "폐수", "처리장", "플랜트"],
     "조경공사업": ["조경공사", "조경 공사", "공원조성", "녹지공사", "식재공사"],
+
+    # 전문건설
     "지반조성·포장공사업": ["지반조성", "포장", "아스콘", "아스팔트", "콘크리트포장", "보도포장", "토공", "보링", "그라우팅", "파일"],
     "실내건축공사업": ["실내건축", "인테리어", "내장", "수장"],
-    "금속·창호·지붕·건축물조립공사업": ["금속", "창호", "지붕", "판넬", "건축물조립"],
+    "금속·창호·지붕·건축물조립공사업": ["금속", "창호", "지붕", "판넬", "건축물조립", "온실"],
     "도장·습식·방수·석공사업": ["도장", "습식", "방수", "석공", "석축", "타일", "미장"],
     "조경식재·시설물공사업": ["조경", "식재", "시설물", "공원", "놀이터"],
     "철근·콘크리트공사업": ["철근", "콘크리트", "철콘", "옹벽", "측구", "수로", "구조물"],
@@ -416,9 +593,68 @@ LICENSE_KEYWORDS = {
     "가스·난방공사업": ["가스", "난방"],
     "토공사": ["토공", "터파기", "성토", "절토", "흙막이"],
     "포장공사": ["포장", "아스콘", "아스팔트", "콘크리트포장", "보도포장"],
+    "보링·그라우팅·파일공사": ["보링", "그라우팅", "파일", "지반"],
+    "금속구조물공사": ["금속구조물", "난간", "휀스", "울타리"],
+    "창호공사": ["창호", "문", "창문", "샷시", "새시"],
+    "지붕판금·건축물조립공사": ["지붕", "판금", "건축물조립", "판넬"],
+    "도장공사": ["도장", "페인트"],
+    "습식·방수공사": ["방수", "습식", "미장", "타일"],
+    "석공사": ["석공", "석축", "화강석"],
+    "조경식재공사": ["조경식재", "식재", "나무", "잔디"],
+    "조경시설물설치공사": ["조경시설물", "시설물", "놀이터", "공원시설"],
     "철근·콘크리트공사": ["철근", "콘크리트", "철콘", "옹벽", "측구"],
+    "구조물해체공사": ["구조물해체", "해체", "철거"],
+    "비계공사": ["비계", "발판"],
     "상수도설비공사": ["상수도", "상수관", "급수"],
     "하수도설비공사": ["하수도", "하수관", "오수", "우수", "관거"],
+    "수중공사": ["수중"],
+    "준설공사": ["준설"],
+    "기계설비공사": ["기계설비", "배관", "펌프"],
+    "가스시설공사 제1종": ["가스시설", "가스"],
+    "가스시설공사 제2종": ["가스시설", "가스"],
+    "가스시설공사 제3종": ["가스시설", "가스"],
+    "난방공사 제1종": ["난방"],
+    "난방공사 제2종": ["난방"],
+    "난방공사 제3종": ["난방"],
+
+    # 별도 공사업/등록업
+    "전기공사업": ["전기", "전기공사", "전기설비", "전력", "배전", "가로등", "보안등", "조명", "LED", "태양광"],
+    "정보통신공사업": ["정보통신", "통신", "CCTV", "네트워크", "방송설비"],
+    "전문소방시설공사업": ["소방", "소방시설", "스프링클러", "화재감지"],
+    "일반소방시설공사업(기계)": ["소방", "기계소방", "스프링클러"],
+    "일반소방시설공사업(전기)": ["소방", "전기소방", "화재감지"],
+    "석면해체·제거업": ["석면", "석면해체", "석면제거"],
+    "지하수개발·이용시공업": ["지하수", "관정"],
+    "옥외광고사업": ["옥외광고", "간판"],
+
+    # 환경/폐기물/산림/문화재/용역
+    "대기환경전문공사업": ["대기", "환경전문"],
+    "수질환경전문공사업": ["수질", "폐수", "오수", "처리시설"],
+    "소음·진동환경전문공사업": ["소음", "진동"],
+    "폐기물처리시설 설계·시공업": ["폐기물처리시설", "폐기물 처리시설"],
+    "건설폐기물 수집·운반업": ["건설폐기물", "폐기물", "수집", "운반"],
+    "폐기물 수집·운반업": ["폐기물", "수집", "운반"],
+    "산림사업법인(산림토목)": ["산림토목", "사방", "임도"],
+    "산림사업법인(숲가꾸기 및 병해충방제)": ["숲가꾸기", "병해충", "방제"],
+    "산림사업법인(도시숲등 조성·관리)": ["도시숲", "가로수"],
+    "나무병원 1종": ["나무병원", "수목진료"],
+    "나무병원 2종": ["나무병원", "수목진료"],
+    "종합국가유산수리업(보수단청업)": ["국가유산", "문화재", "보수", "단청"],
+    "종합국가유산수리업(조경업)": ["국가유산", "문화재", "조경"],
+    "전문국가유산수리업(식물보호업)": ["국가유산", "문화재", "식물보호"],
+    "전문국가유산수리업(실측설계업)": ["국가유산", "문화재", "실측설계"],
+    "건설엔지니어링업": ["건설엔지니어링", "감리", "설계", "건설사업관리"],
+    "엔지니어링사업자": ["엔지니어링", "설계"],
+    "기술사사무소": ["기술사", "설계"],
+    "건축사사무소": ["건축사", "설계"],
+    "일반측량업": ["측량"],
+    "공공측량업": ["공공측량"],
+    "측지측량업": ["측지측량"],
+    "지하시설물측량업": ["지하시설물", "측량"],
+    "안전진단전문기관(교량 및 터널)": ["안전진단", "교량", "터널"],
+    "안전진단전문기관(건축)": ["안전진단", "건축"],
+    "안전진단전문기관(종합)": ["안전진단", "종합"],
+    "지하안전평가전문기관": ["지하안전", "지하안전평가"],
 }
 
 WORK_TYPE_OPTIONS = [
@@ -540,87 +776,122 @@ MATERIAL_KEYWORDS = {
 # =========================================================
 
 WORK_GROUP_RULES = {
+    "설계·감리·건설사업관리": {
+        "profile_terms": [
+            "건설엔지니어링업(종합)", "건설엔지니어링업(설계·사업관리)", "건설엔지니어링업(품질검사)",
+            "건설사업관리용역업", "감독권한대행 등 건설사업관리용역",
+            "건설공사 감리용역", "건설공사 설계용역",
+            "건축사사무소", "건축사사무소(건축설계)", "건축사사무소(공사감리)", "법인건축사사무소",
+            "전력시설물 설계업(종합설계업)", "전력시설물 설계업(전문설계업 1종)", "전력시설물 설계업(전문설계업 2종)",
+            "전력시설물 감리업(종합감리업)", "전력시설물 감리업(전문감리업)",
+            "전문소방시설설계업", "일반소방시설설계업(기계)", "일반소방시설설계업(전기)",
+            "전문소방공사감리업", "일반소방공사감리업(기계)", "일반소방공사감리업(전기)",
+            "정보통신 설계용역", "정보통신 감리용역", "정보통신공사 감리용역",
+            "엔지니어링사업자", "엔지니어링사업자(건설부문)", "엔지니어링사업자(구조)",
+            "엔지니어링사업자(토질·지질)", "엔지니어링사업자(도로·공항)", "엔지니어링사업자(상하수도)",
+            "엔지니어링사업자(수자원개발)", "엔지니어링사업자(도시계획)", "엔지니어링사업자(조경)",
+            "엔지니어링사업자(교통)", "엔지니어링사업자(농어업토목)", "엔지니어링사업자(전기)",
+            "엔지니어링사업자(정보통신)", "엔지니어링사업자(환경)", "엔지니어링사업자(소방·방재)",
+            "기술사사무소", "기술사사무소(건설)", "기술사사무소(토목)", "기술사사무소(건축)",
+            "기술사사무소(전기)", "기술사사무소(정보통신)", "기술사사무소(환경)", "기술사사무소(소방·방재)",
+        ],
+        "bid_terms": [
+            "설계", "실시설계", "기본설계", "설계용역", "감리", "감리용역", "공사감리",
+            "건설사업관리", "CM", "감독권한대행", "건설엔지니어링", "엔지니어링",
+            "타당성조사", "기본계획", "실시설계용역", "설계도서", "구조검토",
+            "지반조사", "토질조사", "안전진단", "정밀안전진단", "정밀안전점검",
+        ],
+        "strong_exclude": True,
+    },
     "전기": {
-        "profile_terms": ["전기공", "전기공사업"],
+        "profile_terms": ["전기공사업", "전력시설물 설계업(종합설계업)", "전력시설물 설계업(전문설계업 1종)", "전력시설물 설계업(전문설계업 2종)", "전력시설물 감리업(종합감리업)", "전력시설물 감리업(전문감리업)", "엔지니어링사업자(전기)", "기술사사무소(전기)"],
         "bid_terms": ["전기", "전기공사", "전기설비", "전력", "배전", "수전", "분전반", "가로등", "보안등", "조명", "LED", "케이블", "전선", "배선", "태양광"],
         "strong_exclude": True,
     },
     "건축": {
-        "profile_terms": ["건축공사업", "토목건축공사업", "건축공", "신축", "증축", "대수선", "리모델링", "실내건축"],
+        "profile_terms": ["건축공사업", "토목건축공사업", "실내건축공사업", "실내건축공사", "건축사사무소", "건축사사무소(건축설계)", "건축사사무소(공사감리)", "법인건축사사무소", "엔지니어링사업자(구조)", "기술사사무소(건축)"],
         "bid_terms": ["건축", "건축공사", "신축", "증축", "대수선", "리모델링", "실내건축", "인테리어", "내장", "수장", "화장실", "청사", "사무실"],
         "strong_exclude": True,
     },
     "방수·도장·석공": {
-        "profile_terms": ["도장·습식·방수·석공사업", "도장공사", "습식·방수공사", "방수공", "도장공", "석공사", "석공", "미장공", "타일공"],
-        "bid_terms": ["방수", "도장", "습식", "석공", "미장", "타일", "도막방수", "우레탄방수", "옥상방수", "누수", "외벽보수", "외벽 보수"],
+        "profile_terms": ["도장·습식·방수·석공사업", "도장공사", "습식·방수공사", "석공사"],
+        "bid_terms": ["방수", "도장", "습식", "석공", "미장", "타일", "도막방수", "우레탄방수", "옥상방수", "누수", "외벽보수"],
         "strong_exclude": True,
     },
     "금속·창호·지붕": {
-        "profile_terms": ["금속·창호·지붕·건축물조립공사업", "금속공", "창호공", "지붕공", "판금공", "금속구조물공사", "창호공사", "지붕판금·건축물조립공사"],
+        "profile_terms": ["금속·창호·지붕·건축물조립공사업", "금속구조물공사", "창호공사", "온실설치공사", "지붕판금·건축물조립공사"],
         "bid_terms": ["금속", "창호", "지붕", "판금", "샷시", "새시", "문교체", "창문교체", "난간", "캐노피", "차양"],
         "strong_exclude": True,
     },
     "철거·비계": {
-        "profile_terms": ["구조물해체·비계공사업", "구조물해체공사", "철거공", "비계공"],
-        "bid_terms": ["철거", "해체", "구조물해체", "비계"],
+        "profile_terms": ["구조물해체·비계공사업", "구조물해체공사", "비계공사", "석면해체·제거업"],
+        "bid_terms": ["철거", "해체", "구조물해체", "비계", "석면"],
         "strong_exclude": True,
     },
     "통신": {
-        "profile_terms": ["통신공", "정보통신", "CCTV"],
+        "profile_terms": ["정보통신공사업", "정보통신 설계용역", "정보통신 감리용역", "정보통신공사 감리용역", "엔지니어링사업자(정보통신)", "기술사사무소(정보통신)"],
         "bid_terms": ["통신", "정보통신", "CCTV", "방송설비", "네트워크", "무선"],
         "strong_exclude": True,
     },
     "소방": {
-        "profile_terms": ["소방설비"],
+        "profile_terms": ["전문소방시설공사업", "일반소방시설공사업(기계)", "일반소방시설공사업(전기)", "소방시설관리업", "전문소방시설설계업", "일반소방시설설계업(기계)", "일반소방시설설계업(전기)", "전문소방공사감리업", "일반소방공사감리업(기계)", "일반소방공사감리업(전기)", "엔지니어링사업자(소방·방재)", "기술사사무소(소방·방재)"],
         "bid_terms": ["소방", "화재감지", "스프링클러", "감지기"],
         "strong_exclude": True,
     },
     "기계설비": {
-        "profile_terms": ["기계설비·가스공사업", "기계설비공사", "기계설비", "냉난방", "공조", "위생설비", "펌프설비", "배관공"],
-        "bid_terms": ["기계설비", "냉난방", "공조", "위생설비", "펌프", "보일러", "배관", "환기설비", "급배수설비"],
+        "profile_terms": ["기계설비·가스공사업", "기계설비공사", "가스·난방공사업", "가스시설공사 제1종", "가스시설공사 제2종", "가스시설공사 제3종", "난방공사 제1종", "난방공사 제2종", "난방공사 제3종"],
+        "bid_terms": ["기계설비", "냉난방", "공조", "위생설비", "펌프", "보일러", "배관", "환기설비", "급배수설비", "가스", "난방"],
         "strong_exclude": True,
     },
     "조경": {
-        "profile_terms": ["조경공사업", "조경식재·시설물공사업", "조경공", "조경식재", "조경시설물", "공원시설", "잔디식재", "수목식재"],
-        "bid_terms": ["조경", "조경식재", "조경시설", "수목", "잔디", "공원시설", "식재", "녹지"],
+        "profile_terms": ["조경공사업", "조경식재·시설물공사업", "조경식재공사", "조경시설물설치공사", "산림사업법인(도시숲등 조성·관리)", "나무병원 1종", "나무병원 2종", "엔지니어링사업자(조경)"],
+        "bid_terms": ["조경", "조경식재", "조경시설", "수목", "잔디", "공원시설", "식재", "녹지", "가로수"],
         "strong_exclude": True,
     },
-
-    # 송원건설 같은 토목/상하수도/포장 업체용 핵심 공종
     "포장": {
-        "profile_terms": ["지반조성·포장공사업", "포장공사", "포장공", "아스콘포장", "콘크리트포장", "보도블록포장"],
-        "bid_terms": ["포장", "아스콘", "아스팔트", "콘크리트포장", "보도블록", "보도 블록", "도로포장", "인도포장"],
+        "profile_terms": ["지반조성·포장공사업", "포장공사"],
+        "bid_terms": ["포장", "아스콘", "아스팔트", "콘크리트포장", "보도블록", "도로포장", "인도포장"],
         "strong_exclude": False,
     },
     "상하수도·배수": {
-        "profile_terms": ["상·하수도설비공사업", "상수도설비공사", "하수도설비공사", "상수도관로", "하수도관로", "우수관로", "오수관로", "맨홀", "배수공", "배수로", "측구", "수로관", "집수정"],
+        "profile_terms": ["상·하수도설비공사업", "상수도설비공사", "하수도설비공사"],
         "bid_terms": ["상하수도", "상수도", "하수도", "관로", "관거", "우수", "오수", "맨홀", "배수", "배수로", "측구", "수로관", "집수정", "플륨관"],
         "strong_exclude": False,
     },
     "철근콘크리트·구조물": {
-        "profile_terms": ["철근·콘크리트공사업", "철근·콘크리트공사", "철근콘크리트구조물", "옹벽", "석축", "블록쌓기", "암거", "박스 culvert"],
+        "profile_terms": ["철근·콘크리트공사업", "철근·콘크리트공사"],
         "bid_terms": ["철근", "콘크리트", "철콘", "옹벽", "석축", "블록", "구조물", "암거", "박스", "BOX", "컬버트"],
         "strong_exclude": False,
     },
     "토공·지반": {
-        "profile_terms": ["지반조성·포장공사업", "토공사", "토공", "흙막이", "비탈면보강", "보링·그라우팅", "파일공"],
-        "bid_terms": ["토공", "터파기", "성토", "절토", "흙막이", "비탈면", "사면", "법면", "보링", "그라우팅", "파일"],
+        "profile_terms": ["지반조성·포장공사업", "토공사", "보링·그라우팅·파일공사", "지하수개발·이용시공업"],
+        "bid_terms": ["토공", "터파기", "성토", "절토", "흙막이", "비탈면", "사면", "법면", "보링", "그라우팅", "파일", "지하수", "관정"],
         "strong_exclude": False,
     },
     "도로·농로·하천": {
-        "profile_terms": ["토목공사업", "도로공", "농로공", "하천공", "소하천정비", "구거정비", "제방공", "호안공", "재해복구", "유지보수"],
-        "bid_terms": ["도로", "농로", "하천", "소하천", "구거", "제방", "호안", "재해복구", "수해복구", "정비", "보수"],
+        "profile_terms": ["토목공사업", "토목건축공사업", "지반조성·포장공사업", "철근·콘크리트공사업", "상·하수도설비공사업", "산림사업법인(산림토목)"],
+        "bid_terms": ["도로", "농로", "하천", "소하천", "구거", "제방", "호안", "재해복구", "수해복구", "정비", "보수", "임도", "사방"],
         "strong_exclude": False,
     },
-    "자재납품": {
-        "profile_terms": ["아스콘", "레미콘", "콘크리트", "시멘트", "모래", "쇄석", "골재", "흄관", "PE관", "PVC관", "스틸그레이팅", "맨홀뚜껑", "보도블록", "철근", "가드레일", "휀스", "기타 건설자재"],
-        "bid_terms": ["납품", "구매", "자재", "관급자재", "물품", "제조", "구입", "아스콘", "레미콘", "골재", "흄관", "보도블록"],
+    "환경·폐기물": {
+        "profile_terms": ["대기환경전문공사업", "수질환경전문공사업", "소음·진동환경전문공사업", "폐기물처리시설 설계·시공업", "건설폐기물 수집·운반업", "폐기물 수집·운반업", "폐기물 중간처분업", "폐기물 종합재활용업"],
+        "bid_terms": ["폐기물", "건설폐기물", "수집", "운반", "처리시설", "대기", "수질", "소음", "진동", "환경"],
+        "strong_exclude": False,
+    },
+    "측량·용역": {
+        "profile_terms": ["건설엔지니어링업", "엔지니어링사업자", "기술사사무소", "건축사사무소", "일반측량업", "공공측량업", "측지측량업", "지하시설물측량업", "안전진단전문기관(교량 및 터널)", "안전진단전문기관(건축)", "안전진단전문기관(종합)", "지하안전평가전문기관"],
+        "bid_terms": ["측량", "설계", "엔지니어링", "감리", "건설사업관리", "안전진단", "지하안전"],
+        "strong_exclude": False,
+    },
+    "국가유산·문화재": {
+        "profile_terms": ["종합국가유산수리업(보수단청업)", "종합국가유산수리업(조경업)", "전문국가유산수리업(보존과학업)", "전문국가유산수리업(식물보호업)", "문화재수리업"],
+        "bid_terms": ["국가유산", "문화재", "단청", "보존과학", "식물보호"],
         "strong_exclude": False,
     },
 }
 
 # 내 회사 맞춤 공고에서 제외할 수 있는 큰 분류 키워드
-# 회사 프로필에 해당 면허/공종이 없으면 아래 키워드가 강하게 잡히는 공고는 제외합니다.
+# 회사 프로필에 해당 면허/등록업종이 없으면 아래 키워드가 강하게 잡히는 공고는 제외합니다.
 PROFILE_EXCLUDE_RULES = {
     "전기": {
         "profile_terms": ["전기공", "전기공사업"],
@@ -1402,8 +1673,6 @@ def text_has_term(text: str, term: str) -> bool:
 def profile_selected_text(profile: dict) -> str:
     parts = []
     parts.extend(profile.get("licenses", []) or [])
-    parts.extend(profile.get("work_types", []) or [])
-    parts.extend(profile.get("material_supplies", []) or [])
     return " ".join(parts)
 
 
@@ -1441,7 +1710,7 @@ def get_profile_exact_filter_reason(item: dict, profile: dict) -> str:
     bid_groups = get_bid_work_groups(item)
 
     if not allowed_groups:
-        return "회사 프로필에 면허/공종/자재 선택 없음"
+        return "회사 프로필에 면허/등록업종 선택 없음"
 
     if not bid_groups:
         return "공고에서 공종을 정확히 판별 못함"
@@ -1511,8 +1780,6 @@ def get_profile_siping_exact_reason(item: dict, profile: dict) -> str:
 def profile_selected_terms(profile: dict) -> list:
     terms = []
     terms.extend(profile.get("licenses", []) or [])
-    terms.extend(profile.get("work_types", []) or [])
-    terms.extend(profile.get("material_supplies", []) or [])
     return terms
 
 
@@ -1530,7 +1797,7 @@ def get_profile_exclude_reason(item: dict, profile: dict) -> str:
     for group_name, rule in PROFILE_EXCLUDE_RULES.items():
         if bid_has_any_term(item, rule.get("bid_terms", [])):
             if not profile_has_any_term(profile, rule.get("profile_terms", [])):
-                return f"{group_name} 관련 공고 - 회사 프로필에 해당 면허/공종 없음"
+                return f"{group_name} 관련 공고 - 회사 프로필에 해당 면허/등록업종 없음"
     return ""
 
 
@@ -1649,8 +1916,6 @@ def default_company_profile() -> dict:
         "siping_amount_text": "",
         "siping_amount": 0,
         "licenses": [],
-        "work_types": [],
-        "material_supplies": [],
         "keyword_text": "",
         "updated_at": "",
     }
@@ -1759,6 +2024,33 @@ def render_checkbox_group(name: str, options: list, selected: list) -> str:
     return f'<div class="check-grid">{"".join(html_parts)}</div>'
 
 
+
+def render_license_checkbox_groups(name: str, selected: list) -> str:
+    selected = selected or []
+    group_html = []
+
+    for group in LICENSE_GROUPS:
+        item_html = []
+
+        for option in group.get("items", []):
+            checked = "checked" if option in selected else ""
+            item_html.append(f"""
+                <label class="check-item">
+                    <input type="checkbox" name="{h(name)}" value="{h(option)}" {checked}>
+                    {h(option)}
+                </label>
+            """)
+
+        group_html.append(f"""
+            <div class="region-group">
+                <h4>{h(group.get("title"))}</h4>
+                <div class="check-grid">{"".join(item_html)}</div>
+            </div>
+        """)
+
+    return "".join(group_html)
+
+
 def render_region_buttons(base_path: str, current_region: str, keyword: str = "") -> str:
     buttons = []
 
@@ -1807,7 +2099,6 @@ def render_bid_table(bids: list) -> str:
                 <td>{h(bid.get("category"))}</td>
                 <td>{h(bid.get("license_label"))}</td>
                 <td>{h(bid.get("work_type_label"))}</td>
-                <td>{h(bid.get("material_label"))}</td>
                 <td>{h(bid.get("profile_match_reason", "-"))}</td>
                 <td>{h(bid.get("region_label"))}</td>
                 <td>{h(bid.get("amount_label"))}</td>
@@ -1833,7 +2124,6 @@ def render_bid_table(bids: list) -> str:
                     <th>분류</th>
                     <th>면허 추정</th>
                     <th>공종 추정</th>
-                    <th>자재 추정</th>
                     <th>맞춤 사유</th>
                     <th>지역</th>
                     <th>금액</th>
@@ -2178,7 +2468,7 @@ def health():
     return {
         "status": "ok",
         "service": "gongsa-bid",
-        "version": "siping-missing-allowed-1.0.0",
+        "version": "license-design-supervision-1.0.0",
         "has_DATA_GO_KR_SERVICE_KEY": bool(DATA_GO_KR_SERVICE_KEY),
     }
 
@@ -2212,7 +2502,7 @@ def home():
         <h2>공사입찰 공고 검색</h2>
         <p class="notice">
             송원건설 주력 키워드로 나라장터 공사 공고를 검색합니다.<br>
-            회사 프로필에서 지역, 시공능력평가액, 면허, 공종, 자재납품 품목을 저장할 수 있습니다.
+            회사 프로필에서 지역, 시공능력평가액, 보유 면허/등록업종을 저장할 수 있습니다.
         </p>
 
         <div class="menu">
@@ -2237,8 +2527,6 @@ def home():
             <strong>입찰 가능지역:</strong> {h(format_region_list(profile.get("possible_regions", [])) or "선택 안 함")}<br>
             <strong>시공능력평가액:</strong> {h(format_money(profile.get("siping_amount", 0)))}<br>
             <strong>보유 면허:</strong> {h(", ".join(profile.get("licenses", [])) if profile.get("licenses") else "아직 선택 안 함")}<br>
-            <strong>주력 공종:</strong> {h(", ".join(profile.get("work_types", [])) if profile.get("work_types") else "아직 선택 안 함")}<br>
-            <strong>자재납품 품목:</strong> {h(", ".join(profile.get("material_supplies", [])) if profile.get("material_supplies") else "아직 선택 안 함")}<br>
             <strong>주력 키워드:</strong> {h(profile.get("keyword_text") or "입력 안 함")}
         </div>
     </div>
@@ -2320,31 +2608,14 @@ def company_profile_page():
         </div>
 
         <div class="card">
-            <h3>보유 종합건설 면허</h3>
-            <p class="notice">종합공사를 시공할 수 있는 면허를 선택하세요.</p>
-            {render_checkbox_group("licenses", GENERAL_CONSTRUCTION_LICENSE_OPTIONS, profile.get("licenses", []))}
-        </div>
-
-        <div class="card">
-            <h3>보유 전문건설 면허 / 주력분야</h3>
-            <p class="notice">전문건설 대업종과 세부 주력분야를 선택하세요.</p>
-            {render_checkbox_group("licenses", SPECIALTY_CONSTRUCTION_LICENSE_OPTIONS, profile.get("licenses", []))}
-        </div>
-
-        <div class="card">
-            <h3>주력 공종</h3>
+            <h3>보유 면허 / 등록업종</h3>
             <p class="notice">
-                실제로 잘하는 공종을 선택하세요.
-                나중에 공고명과 키워드를 보고 내 회사 맞춤 공고를 걸러내는 기준으로 사용합니다.
+                나라장터 공고에서 자주 쓰는 면허·등록업종을 한곳에 모았습니다.<br>
+                종합건설, 전문건설 주력분야, 전기, 통신, 소방, 환경, 폐기물, 산림, 국가유산, 측량·엔지니어링, 설계·감리·건설사업관리 중 회사가 실제 보유한 것만 체크하세요.
             </p>
-            {render_checkbox_group("work_types", WORK_TYPE_OPTIONS, profile.get("work_types", []))}
+            {render_license_checkbox_groups("licenses", profile.get("licenses", []))}
         </div>
 
-        <div class="card">
-            <h3>자재납품 가능 품목</h3>
-            <p class="notice">자재납품은 건설업 면허와 따로 저장합니다.</p>
-            {render_checkbox_group("material_supplies", MATERIAL_SUPPLY_OPTIONS, profile.get("material_supplies", []))}
-        </div>
 
         <div class="card">
             <h3>주력 검색 키워드</h3>
@@ -2360,7 +2631,7 @@ def company_profile_page():
     </form>
     """
 
-    return page_layout("회사 프로필 등록", "회사 정보, 지역, 시공능력평가액, 면허, 공종, 자재납품 품목을 저장하는 화면입니다", body)
+    return page_layout("회사 프로필 등록", "회사 정보, 지역, 시공능력평가액, 보유 면허/등록업종을 저장하는 화면입니다", body)
 
 
 @app.get("/company/profile-save", response_class=HTMLResponse)
@@ -2375,8 +2646,6 @@ def company_profile_save(
     possible_regions: List[str] = Query(default=[]),
     siping_amount_text: str = Query(""),
     licenses: List[str] = Query(default=[]),
-    work_types: List[str] = Query(default=[]),
-    material_supplies: List[str] = Query(default=[]),
     keyword_text: str = Query(""),
 ):
     profile = {
@@ -2391,8 +2660,6 @@ def company_profile_save(
         "siping_amount_text": siping_amount_text.strip(),
         "siping_amount": parse_profile_amount(siping_amount_text),
         "licenses": licenses,
-        "work_types": work_types,
-        "material_supplies": material_supplies,
         "keyword_text": keyword_text.strip(),
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
@@ -2418,8 +2685,6 @@ def company_profile_save(
             <strong>입찰 가능지역:</strong> {h(format_region_list(profile.get("possible_regions", [])) or "선택 안 함")}<br>
             <strong>시공능력평가액:</strong> {h(format_money(profile.get("siping_amount", 0)))}<br>
             <strong>보유 면허:</strong> {h(", ".join(profile.get("licenses", [])) if profile.get("licenses") else "선택 안 함")}<br>
-            <strong>주력 공종:</strong> {h(", ".join(profile.get("work_types", [])) if profile.get("work_types") else "선택 안 함")}<br>
-            <strong>자재납품 품목:</strong> {h(", ".join(profile.get("material_supplies", [])) if profile.get("material_supplies") else "선택 안 함")}<br>
             <strong>주력 키워드:</strong> {h(profile.get("keyword_text") or "입력 안 함")}<br>
             <strong>저장시간:</strong> {h(profile.get("updated_at"))}
         </div>
@@ -2553,7 +2818,7 @@ def my_bids_page(
     <div class="card">
         <h3>맞춤 공고 기준</h3>
         <p class="notice">
-            회사 프로필의 <strong>입찰 가능지역 + 보유 면허 + 주력 공종 + 자재납품 품목 + 시공능력평가액</strong>을 기준으로 공고를 걸러봅니다.<br>
+            회사 프로필의 <strong>입찰 가능지역 + 보유 면허/등록업종 + 시공능력평가액</strong>을 기준으로 공고를 걸러봅니다.<br>
             전기, 건축, 방수, 도장, 창호, 통신, 소방, 기계설비, 조경은 선택한 공종에 없으면 맞춤공고에서 제외합니다.<br>
             시공능력평가액이 입력되어 있으면 시평액보다 큰 공고만 제외합니다. 공고 금액이 없는 경우는 제한 없음으로 보고 포함합니다. 검색은 동시검색과 30분 캐시를 적용했습니다.
         </p>
@@ -2562,9 +2827,7 @@ def my_bids_page(
             <strong>회사명:</strong> {h(profile.get("company_name"))}<br>
             <strong>입찰 가능지역:</strong> {h(format_region_list(profile.get("possible_regions", [])) or "선택 안 함")}<br>
             <strong>시공능력평가액:</strong> {h(format_money(profile.get("siping_amount", 0)))}<br>
-            <strong>보유 면허:</strong> {h(", ".join(profile.get("licenses", [])) if profile.get("licenses") else "선택 안 함")}<br>
-            <strong>주력 공종:</strong> {h(", ".join(profile.get("work_types", [])) if profile.get("work_types") else "선택 안 함")}<br>
-            <strong>주력 키워드:</strong> {h(profile.get("keyword_text") or "입력 안 함")}
+            <strong>보유 면허:</strong> {h(", ".join(profile.get("licenses", [])) if profile.get("licenses") else "선택 안 함")}<br>            <strong>주력 키워드:</strong> {h(profile.get("keyword_text") or "입력 안 함")}
         </div>
     </div>
 
@@ -2586,7 +2849,7 @@ def my_bids_page(
 
     return page_layout(
         "내 회사 맞춤 공고",
-        "회사 프로필의 지역, 공종그룹, 시공능력평가액을 모두 통과한 공고만 보여줍니다",
+        "회사 프로필의 지역, 보유 면허/등록업종, 시공능력평가액을 모두 통과한 공고만 보여줍니다",
         body,
     )
 
