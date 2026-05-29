@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
-app = FastAPI(title="gongsa-bid", version="strict-filter-fast-search-1.0.0")
+app = FastAPI(title="gongsa-bid", version="siping-missing-allowed-1.0.0")
 
 
 DATA_GO_KR_SERVICE_KEY = os.getenv("DATA_GO_KR_SERVICE_KEY", "").strip()
@@ -534,44 +534,153 @@ MATERIAL_KEYWORDS = {
 }
 
 
+
+# =========================================================
+# 내 회사 맞춤 공고 정확 필터 설정
+# =========================================================
+
+WORK_GROUP_RULES = {
+    "전기": {
+        "profile_terms": ["전기공", "전기공사업"],
+        "bid_terms": ["전기", "전기공사", "전기설비", "전력", "배전", "수전", "분전반", "가로등", "보안등", "조명", "LED", "케이블", "전선", "배선", "태양광"],
+        "strong_exclude": True,
+    },
+    "건축": {
+        "profile_terms": ["건축공사업", "토목건축공사업", "건축공", "신축", "증축", "대수선", "리모델링", "실내건축"],
+        "bid_terms": ["건축", "건축공사", "신축", "증축", "대수선", "리모델링", "실내건축", "인테리어", "내장", "수장", "화장실", "청사", "사무실"],
+        "strong_exclude": True,
+    },
+    "방수·도장·석공": {
+        "profile_terms": ["도장·습식·방수·석공사업", "도장공사", "습식·방수공사", "방수공", "도장공", "석공사", "석공", "미장공", "타일공"],
+        "bid_terms": ["방수", "도장", "습식", "석공", "미장", "타일", "도막방수", "우레탄방수", "옥상방수", "누수", "외벽보수", "외벽 보수"],
+        "strong_exclude": True,
+    },
+    "금속·창호·지붕": {
+        "profile_terms": ["금속·창호·지붕·건축물조립공사업", "금속공", "창호공", "지붕공", "판금공", "금속구조물공사", "창호공사", "지붕판금·건축물조립공사"],
+        "bid_terms": ["금속", "창호", "지붕", "판금", "샷시", "새시", "문교체", "창문교체", "난간", "캐노피", "차양"],
+        "strong_exclude": True,
+    },
+    "철거·비계": {
+        "profile_terms": ["구조물해체·비계공사업", "구조물해체공사", "철거공", "비계공"],
+        "bid_terms": ["철거", "해체", "구조물해체", "비계"],
+        "strong_exclude": True,
+    },
+    "통신": {
+        "profile_terms": ["통신공", "정보통신", "CCTV"],
+        "bid_terms": ["통신", "정보통신", "CCTV", "방송설비", "네트워크", "무선"],
+        "strong_exclude": True,
+    },
+    "소방": {
+        "profile_terms": ["소방설비"],
+        "bid_terms": ["소방", "화재감지", "스프링클러", "감지기"],
+        "strong_exclude": True,
+    },
+    "기계설비": {
+        "profile_terms": ["기계설비·가스공사업", "기계설비공사", "기계설비", "냉난방", "공조", "위생설비", "펌프설비", "배관공"],
+        "bid_terms": ["기계설비", "냉난방", "공조", "위생설비", "펌프", "보일러", "배관", "환기설비", "급배수설비"],
+        "strong_exclude": True,
+    },
+    "조경": {
+        "profile_terms": ["조경공사업", "조경식재·시설물공사업", "조경공", "조경식재", "조경시설물", "공원시설", "잔디식재", "수목식재"],
+        "bid_terms": ["조경", "조경식재", "조경시설", "수목", "잔디", "공원시설", "식재", "녹지"],
+        "strong_exclude": True,
+    },
+
+    # 송원건설 같은 토목/상하수도/포장 업체용 핵심 공종
+    "포장": {
+        "profile_terms": ["지반조성·포장공사업", "포장공사", "포장공", "아스콘포장", "콘크리트포장", "보도블록포장"],
+        "bid_terms": ["포장", "아스콘", "아스팔트", "콘크리트포장", "보도블록", "보도 블록", "도로포장", "인도포장"],
+        "strong_exclude": False,
+    },
+    "상하수도·배수": {
+        "profile_terms": ["상·하수도설비공사업", "상수도설비공사", "하수도설비공사", "상수도관로", "하수도관로", "우수관로", "오수관로", "맨홀", "배수공", "배수로", "측구", "수로관", "집수정"],
+        "bid_terms": ["상하수도", "상수도", "하수도", "관로", "관거", "우수", "오수", "맨홀", "배수", "배수로", "측구", "수로관", "집수정", "플륨관"],
+        "strong_exclude": False,
+    },
+    "철근콘크리트·구조물": {
+        "profile_terms": ["철근·콘크리트공사업", "철근·콘크리트공사", "철근콘크리트구조물", "옹벽", "석축", "블록쌓기", "암거", "박스 culvert"],
+        "bid_terms": ["철근", "콘크리트", "철콘", "옹벽", "석축", "블록", "구조물", "암거", "박스", "BOX", "컬버트"],
+        "strong_exclude": False,
+    },
+    "토공·지반": {
+        "profile_terms": ["지반조성·포장공사업", "토공사", "토공", "흙막이", "비탈면보강", "보링·그라우팅", "파일공"],
+        "bid_terms": ["토공", "터파기", "성토", "절토", "흙막이", "비탈면", "사면", "법면", "보링", "그라우팅", "파일"],
+        "strong_exclude": False,
+    },
+    "도로·농로·하천": {
+        "profile_terms": ["토목공사업", "도로공", "농로공", "하천공", "소하천정비", "구거정비", "제방공", "호안공", "재해복구", "유지보수"],
+        "bid_terms": ["도로", "농로", "하천", "소하천", "구거", "제방", "호안", "재해복구", "수해복구", "정비", "보수"],
+        "strong_exclude": False,
+    },
+    "자재납품": {
+        "profile_terms": ["아스콘", "레미콘", "콘크리트", "시멘트", "모래", "쇄석", "골재", "흄관", "PE관", "PVC관", "스틸그레이팅", "맨홀뚜껑", "보도블록", "철근", "가드레일", "휀스", "기타 건설자재"],
+        "bid_terms": ["납품", "구매", "자재", "관급자재", "물품", "제조", "구입", "아스콘", "레미콘", "골재", "흄관", "보도블록"],
+        "strong_exclude": False,
+    },
+}
+
 # 내 회사 맞춤 공고에서 제외할 수 있는 큰 분류 키워드
 # 회사 프로필에 해당 면허/공종이 없으면 아래 키워드가 강하게 잡히는 공고는 제외합니다.
 PROFILE_EXCLUDE_RULES = {
     "전기": {
-        "profile_terms": ["전기공", "전기", "전기공사업"],
-        "bid_terms": ["전기공사", "전기 공사", "전기설비", "전력", "배전", "수전", "분전반", "가로등", "보안등", "조명공사"],
+        "profile_terms": ["전기공", "전기공사업"],
+        "bid_terms": [
+            "전기", "전기공사", "전기 공사", "전기설비", "전기 설비",
+            "전력", "배전", "수전", "분전반", "분전", "차단기",
+            "가로등", "보안등", "조명", "조명공사", "등기구", "LED",
+            "케이블", "전선", "배선", "전등", "전력간선", "태양광",
+        ],
     },
     "건축": {
         "profile_terms": ["건축공사업", "토목건축공사업", "건축공", "신축", "증축", "대수선", "리모델링", "실내건축"],
-        "bid_terms": ["건축공사", "건축 공사", "신축", "증축", "대수선", "리모델링", "인테리어", "실내건축", "내장공사"],
+        "bid_terms": [
+            "건축", "건축공사", "건축 공사", "신축", "증축", "대수선",
+            "리모델링", "인테리어", "실내건축", "내장공사", "수장공사",
+            "건물", "청사", "사무실", "화장실 개선", "화장실 보수",
+        ],
     },
     "도장·방수·석공": {
         "profile_terms": ["도장·습식·방수·석공사업", "도장공사", "습식·방수공사", "방수공", "도장공", "석공사", "석공", "미장공", "타일공"],
-        "bid_terms": ["방수공사", "방수 공사", "도장공사", "도장 공사", "습식공사", "습식 공사", "석공사", "석공 공사", "미장공사", "타일공사", "도막방수", "우레탄방수", "옥상방수"],
+        "bid_terms": [
+            "방수", "방수공사", "방수 공사", "도장", "도장공사", "도장 공사",
+            "습식", "습식공사", "석공", "석공사", "미장", "미장공사",
+            "타일", "타일공사", "도막방수", "우레탄방수", "옥상방수",
+            "누수", "균열보수", "외벽보수", "외벽 보수",
+        ],
     },
     "금속·창호·지붕": {
         "profile_terms": ["금속·창호·지붕·건축물조립공사업", "금속공", "창호공", "지붕공", "판금공", "금속구조물공사", "창호공사", "지붕판금·건축물조립공사"],
-        "bid_terms": ["금속공사", "창호공사", "창호 공사", "지붕공사", "판금공사", "샷시", "새시", "문교체", "창문교체"],
+        "bid_terms": [
+            "금속", "금속공사", "창호", "창호공사", "지붕", "지붕공사",
+            "판금", "판금공사", "샷시", "새시", "문교체", "창문교체",
+            "난간", "캐노피", "차양",
+        ],
     },
     "철거·비계": {
         "profile_terms": ["구조물해체·비계공사업", "구조물해체공사", "철거공", "비계공"],
-        "bid_terms": ["철거공사", "철거 공사", "해체공사", "구조물해체", "비계공사", "비계 공사"],
+        "bid_terms": ["철거", "철거공사", "해체", "해체공사", "구조물해체", "비계", "비계공사"],
     },
     "통신": {
         "profile_terms": ["통신공", "정보통신", "CCTV"],
-        "bid_terms": ["통신공사", "정보통신", "CCTV", "방송설비", "네트워크"],
+        "bid_terms": ["통신", "통신공사", "정보통신", "CCTV", "방송설비", "네트워크", "방송장비", "무선"],
     },
     "소방": {
         "profile_terms": ["소방설비"],
-        "bid_terms": ["소방공사", "소방설비", "화재감지", "스프링클러"],
+        "bid_terms": ["소방", "소방공사", "소방설비", "화재감지", "스프링클러", "감지기"],
     },
     "기계설비": {
         "profile_terms": ["기계설비·가스공사업", "기계설비공사", "기계설비", "냉난방", "공조", "위생설비", "펌프설비", "배관공"],
-        "bid_terms": ["기계설비", "냉난방", "공조", "위생설비", "펌프", "보일러", "배관공사"],
+        "bid_terms": [
+            "기계설비", "냉난방", "공조", "위생설비", "펌프", "보일러",
+            "배관공사", "공기조화", "환기설비", "급배수설비",
+        ],
     },
     "조경": {
         "profile_terms": ["조경공사업", "조경식재·시설물공사업", "조경공", "조경식재", "조경시설물", "공원시설", "잔디식재", "수목식재"],
-        "bid_terms": ["조경공사", "조경 공사", "조경식재", "조경시설", "수목", "잔디", "공원시설", "식재공사", "식재 공사"],
+        "bid_terms": [
+            "조경", "조경공사", "조경 식재", "조경시설", "수목",
+            "잔디", "공원시설", "식재공사", "식재 공사", "녹지",
+        ],
     },
 }
 
@@ -1281,6 +1390,124 @@ def get_profile_matched_regions(item: dict, profile_regions: list) -> list:
     return matched
 
 
+
+def normalize_text_for_match(value: str) -> str:
+    return re.sub(r"\s+", "", str(value or "").lower())
+
+
+def text_has_term(text: str, term: str) -> bool:
+    return normalize_text_for_match(term) in normalize_text_for_match(text)
+
+
+def profile_selected_text(profile: dict) -> str:
+    parts = []
+    parts.extend(profile.get("licenses", []) or [])
+    parts.extend(profile.get("work_types", []) or [])
+    parts.extend(profile.get("material_supplies", []) or [])
+    return " ".join(parts)
+
+
+def get_profile_allowed_work_groups(profile: dict) -> set:
+    selected_text = profile_selected_text(profile)
+    allowed = set()
+
+    if not selected_text.strip():
+        return allowed
+
+    for group_name, rule in WORK_GROUP_RULES.items():
+        for term in rule.get("profile_terms", []):
+            if text_has_term(selected_text, term):
+                allowed.add(group_name)
+                break
+
+    return allowed
+
+
+def get_bid_work_groups(item: dict) -> set:
+    text = make_search_text(item)
+    groups = set()
+
+    for group_name, rule in WORK_GROUP_RULES.items():
+        for term in rule.get("bid_terms", []):
+            if text_has_term(text, term):
+                groups.add(group_name)
+                break
+
+    return groups
+
+
+def get_profile_exact_filter_reason(item: dict, profile: dict) -> str:
+    allowed_groups = get_profile_allowed_work_groups(profile)
+    bid_groups = get_bid_work_groups(item)
+
+    if not allowed_groups:
+        return "회사 프로필에 면허/공종/자재 선택 없음"
+
+    if not bid_groups:
+        return "공고에서 공종을 정확히 판별 못함"
+
+    # 강력 제외 공종은 선택하지 않았으면 하나라도 걸리는 즉시 제외
+    blocked = []
+    for group in bid_groups:
+        rule = WORK_GROUP_RULES.get(group, {})
+        if rule.get("strong_exclude") and group not in allowed_groups:
+            blocked.append(group)
+
+    if blocked:
+        return "선택하지 않은 공종 포함: " + ", ".join(sorted(blocked))
+
+    matched = allowed_groups.intersection(bid_groups)
+
+    if not matched:
+        return "선택한 공종과 공고 공종 불일치"
+
+    return "공종 일치: " + ", ".join(sorted(matched))
+
+
+def match_profile_exact_work(item: dict, profile: dict) -> bool:
+    reason = get_profile_exact_filter_reason(item, profile)
+    return reason.startswith("공종 일치:")
+
+
+def match_profile_siping_exact(item: dict, profile: dict) -> bool:
+    """
+    시평액을 적용합니다.
+
+    기준:
+    - 회사 시평액 미입력: 통과
+    - 공고 금액 없음: 제한 없는 것으로 보고 통과
+    - 공고 금액 있음: 회사 시평액 이내면 통과, 초과면 제외
+    """
+    profile_limit = int(profile.get("siping_amount") or 0)
+
+    if profile_limit <= 0:
+        return True
+
+    bid_amount = get_bid_amount(item)
+
+    # 공고 금액이 안 나오는 경우는 제한 없는 것으로 보고 포함
+    if bid_amount <= 0:
+        return True
+
+    return bid_amount <= profile_limit
+
+
+def get_profile_siping_exact_reason(item: dict, profile: dict) -> str:
+    profile_limit = int(profile.get("siping_amount") or 0)
+    bid_amount = get_bid_amount(item)
+
+    if profile_limit <= 0:
+        return "시평액 미입력 - 제한 없음"
+
+    if bid_amount <= 0:
+        return "공고 금액 없음 - 제한 없음으로 포함"
+
+    if bid_amount <= profile_limit:
+        return f"시평액 이내: {format_money(bid_amount)} / {format_money(profile_limit)}"
+
+    return f"시평액 초과: {format_money(bid_amount)} / {format_money(profile_limit)}"
+
+
 def profile_selected_terms(profile: dict) -> list:
     terms = []
     terms.extend(profile.get("licenses", []) or [])
@@ -1308,113 +1535,20 @@ def get_profile_exclude_reason(item: dict, profile: dict) -> str:
 
 
 def match_profile_specialty(item: dict, profile: dict) -> bool:
-    selected_licenses = set(profile.get("licenses", []) or [])
-    selected_work_types = set(profile.get("work_types", []) or [])
-    selected_materials = set(profile.get("material_supplies", []) or [])
-
-    if not selected_licenses and not selected_work_types and not selected_materials:
-        return True
-
-    if get_profile_exclude_reason(item, profile):
-        return False
-
-    inferred_licenses = set(infer_licenses(item))
-    inferred_work_types = set(infer_work_types(item))
-    inferred_materials = set(infer_materials(item))
-
-    if selected_licenses and inferred_licenses.intersection(selected_licenses):
-        return True
-
-    if selected_work_types and inferred_work_types.intersection(selected_work_types):
-        return True
-
-    if selected_materials and inferred_materials.intersection(selected_materials):
-        return True
-
-    text = make_search_text(item)
-    for keyword in split_keywords(profile.get("keyword_text", "")):
-        if keyword and keyword in text:
-            return True
-
-    return False
+    # 정확 필터: 선택한 공종그룹과 공고 공종그룹이 실제로 일치해야 함
+    return match_profile_exact_work(item, profile)
 
 
 def get_profile_specialty_reason(item: dict, profile: dict) -> str:
-    exclude_reason = get_profile_exclude_reason(item, profile)
-    if exclude_reason:
-        return exclude_reason
-
-    selected_licenses = set(profile.get("licenses", []) or [])
-    selected_work_types = set(profile.get("work_types", []) or [])
-    selected_materials = set(profile.get("material_supplies", []) or [])
-
-    inferred_licenses = set(infer_licenses(item))
-    inferred_work_types = set(infer_work_types(item))
-    inferred_materials = set(infer_materials(item))
-
-    matched = []
-
-    license_match = inferred_licenses.intersection(selected_licenses)
-    work_match = inferred_work_types.intersection(selected_work_types)
-    material_match = inferred_materials.intersection(selected_materials)
-
-    if license_match:
-        matched.append("면허: " + ", ".join(sorted(license_match)))
-
-    if work_match:
-        matched.append("공종: " + ", ".join(sorted(work_match)))
-
-    if material_match:
-        matched.append("자재: " + ", ".join(sorted(material_match)))
-
-    if matched:
-        return " / ".join(matched)
-
-    text = make_search_text(item)
-    keyword_match = [kw for kw in split_keywords(profile.get("keyword_text", "")) if kw and kw in text]
-
-    if keyword_match:
-        return "키워드: " + ", ".join(keyword_match[:5])
-
-    return "-"
-
-
+    return get_profile_exact_filter_reason(item, profile)
 
 
 def match_profile_siping(item: dict, profile: dict) -> bool:
-    """
-    시공능력평가액이 입력되어 있으면,
-    공고 금액이 시평액보다 큰 공고는 내 회사 맞춤 공고에서 제외합니다.
-
-    단, 나라장터 API에서 금액을 못 읽은 공고는 일단 포함합니다.
-    """
-    profile_limit = int(profile.get("siping_amount") or 0)
-
-    if profile_limit <= 0:
-        return True
-
-    bid_amount = get_bid_amount(item)
-
-    if bid_amount <= 0:
-        return True
-
-    return bid_amount <= profile_limit
+    return match_profile_siping_exact(item, profile)
 
 
 def get_profile_siping_reason(item: dict, profile: dict) -> str:
-    profile_limit = int(profile.get("siping_amount") or 0)
-    bid_amount = get_bid_amount(item)
-
-    if profile_limit <= 0:
-        return "시평액 미입력"
-
-    if bid_amount <= 0:
-        return "공고 금액 정보 없음"
-
-    if bid_amount <= profile_limit:
-        return f"시평액 이내: {format_money(bid_amount)} / {format_money(profile_limit)}"
-
-    return f"시평액 초과: {format_money(bid_amount)} / {format_money(profile_limit)}"
+    return get_profile_siping_exact_reason(item, profile)
 
 
 def search_bids_for_profile(
@@ -1429,6 +1563,12 @@ def search_bids_for_profile(
 
     all_items = []
     errors = []
+    exclude_counts = {
+        "지역 불일치": 0,
+        "공종 불일치": 0,
+        "시평액 초과": 0,
+        "마감": 0,
+    }
 
     results = fetch_many_nara_bids(
         keywords=keywords,
@@ -1449,15 +1589,19 @@ def search_bids_for_profile(
 
         for item in result.get("items", []):
             if exclude_closed and is_closed(item):
+                exclude_counts["마감"] += 1
                 continue
 
             if not match_profile_regions(item, profile_regions):
+                exclude_counts["지역 불일치"] += 1
                 continue
 
             if not match_profile_specialty(item, profile):
+                exclude_counts["공종 불일치"] += 1
                 continue
 
             if not match_profile_siping(item, profile):
+                exclude_counts["시평액 초과"] += 1
                 continue
 
             bid = simplify_bid(item, keyword=keyword)
@@ -1466,7 +1610,7 @@ def search_bids_for_profile(
 
             specialty_reason = get_profile_specialty_reason(item, profile)
             siping_reason = get_profile_siping_reason(item, profile)
-            bid["profile_match_reason"] = f"{specialty_reason} / {siping_reason}" if specialty_reason != "-" else siping_reason
+            bid["profile_match_reason"] = f"{specialty_reason} / {siping_reason}"
 
             all_items.append(bid)
 
@@ -1480,9 +1624,11 @@ def search_bids_for_profile(
         "profile_regions": profile_regions,
         "profile_regions_label": format_region_list(profile_regions),
         "count": len(deduped),
+        "exclude_counts": exclude_counts,
         "errors": errors,
         "bids": deduped,
         "speed_note": "동시검색 + 30분 캐시 적용",
+        "filter_note": "지역 + 정확 공종그룹 + 시평액 모두 통과한 공고만 표시",
     }
 
 
@@ -2032,7 +2178,7 @@ def health():
     return {
         "status": "ok",
         "service": "gongsa-bid",
-        "version": "strict-filter-fast-search-1.0.0",
+        "version": "siping-missing-allowed-1.0.0",
         "has_DATA_GO_KR_SERVICE_KEY": bool(DATA_GO_KR_SERVICE_KEY),
     }
 
@@ -2408,8 +2554,8 @@ def my_bids_page(
         <h3>맞춤 공고 기준</h3>
         <p class="notice">
             회사 프로필의 <strong>입찰 가능지역 + 보유 면허 + 주력 공종 + 자재납품 품목 + 시공능력평가액</strong>을 기준으로 공고를 걸러봅니다.<br>
-            전기공사, 건축공사, 방수공사, 도장공사, 조경공사처럼 회사 프로필에 없는 면허/공종은 내 회사 맞춤 공고에서 제외합니다.<br>
-            시공능력평가액이 입력되어 있으면 공고 금액이 시평액보다 큰 공고는 제외합니다. 검색은 동시검색과 30분 캐시를 적용했습니다.
+            전기, 건축, 방수, 도장, 창호, 통신, 소방, 기계설비, 조경은 선택한 공종에 없으면 맞춤공고에서 제외합니다.<br>
+            시공능력평가액이 입력되어 있으면 시평액보다 큰 공고만 제외합니다. 공고 금액이 없는 경우는 제한 없음으로 보고 포함합니다. 검색은 동시검색과 30분 캐시를 적용했습니다.
         </p>
 
         <div class="profile-box">
@@ -2422,6 +2568,15 @@ def my_bids_page(
         </div>
     </div>
 
+    <div class="card">
+        <h3>제외된 공고 수</h3>
+        <p class="notice">
+            지역 불일치: {h(result.get("exclude_counts", {}).get("지역 불일치", 0))}개 /
+            공종 불일치: {h(result.get("exclude_counts", {}).get("공종 불일치", 0))}개 /
+            시평액 초과: {h(result.get("exclude_counts", {}).get("시평액 초과", 0))}개
+        </p>
+    </div>
+
     {error_html}
 
     <div class="card">
@@ -2431,7 +2586,7 @@ def my_bids_page(
 
     return page_layout(
         "내 회사 맞춤 공고",
-        "회사 프로필의 입찰 가능지역, 보유 면허, 주력 공종, 시공능력평가액을 기준으로 공고를 보여줍니다",
+        "회사 프로필의 지역, 공종그룹, 시공능력평가액을 모두 통과한 공고만 보여줍니다",
         body,
     )
 
