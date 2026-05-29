@@ -11,12 +11,14 @@ from typing import List
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
-app = FastAPI(title="gongsa-bid", version="profile-examples-not-saved-1.0.0")
+app = FastAPI(title="gongsa-bid", version="favorite-recent-1.0.0")
 
 
 DATA_GO_KR_SERVICE_KEY = os.getenv("DATA_GO_KR_SERVICE_KEY", "").strip()
 G2B_CONSTRUCTION_API_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoCnstwk"
 PROFILE_FILE = "company_profile.json"
+FAVORITES_FILE = "favorite_bids.json"
+RECENT_FILE = "recent_bids.json"
 NATIONWIDE_AMOUNT_LIMIT = 10_000_000_000
 
 SONGWON_KEYWORDS = [
@@ -1465,6 +1467,152 @@ def split_keywords(keyword_text: str) -> list:
     return keywords or SONGWON_KEYWORDS
 
 
+
+# =========================================================
+# 관심 공고 / 최근 본 공고 저장
+# =========================================================
+
+def load_json_list(file_path: str) -> list:
+    if not os.path.exists(file_path):
+        return []
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+    return []
+
+
+def save_json_list(file_path: str, items: list) -> None:
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(items, f, ensure_ascii=False, indent=2)
+
+
+def bid_key_from_summary(bid: dict) -> str:
+    bid_no = str(bid.get("bid_no") or "").strip()
+    bid_ord = str(bid.get("bid_ord") or "").strip()
+    bid_name = str(bid.get("bid_name") or "").strip()
+    deadline = str(bid.get("deadline") or "").strip()
+    if bid_no:
+        return f"{bid_no}-{bid_ord}"
+    return f"{bid_name}-{deadline}"
+
+
+def make_bid_summary_from_query(
+    bid_no: str = "",
+    bid_ord: str = "",
+    bid_name: str = "",
+    agency: str = "",
+    deadline: str = "",
+    amount_label: str = "",
+    region_label: str = "",
+    g2b_url: str = "",
+) -> dict:
+    return {
+        "bid_no": bid_no.strip(),
+        "bid_ord": bid_ord.strip(),
+        "bid_name": bid_name.strip(),
+        "agency": agency.strip(),
+        "deadline": deadline.strip(),
+        "amount_label": amount_label.strip(),
+        "region_label": region_label.strip(),
+        "g2b_url": g2b_url.strip() or "https://www.g2b.go.kr",
+        "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+def add_unique_bid(file_path: str, bid: dict, max_items: int = 50) -> None:
+    items = load_json_list(file_path)
+    new_key = bid_key_from_summary(bid)
+    filtered = []
+    for item in items:
+        if bid_key_from_summary(item) != new_key:
+            filtered.append(item)
+    filtered.insert(0, bid)
+    filtered = filtered[:max_items]
+    save_json_list(file_path, filtered)
+
+
+def remove_bid_from_file(file_path: str, bid_key: str) -> None:
+    items = load_json_list(file_path)
+    filtered = [item for item in items if bid_key_from_summary(item) != bid_key]
+    save_json_list(file_path, filtered)
+
+
+def bid_summary_query_params(bid: dict) -> str:
+    params = {
+        "bid_no": bid.get("bid_no", ""),
+        "bid_ord": bid.get("bid_ord", ""),
+        "bid_name": bid.get("bid_name", ""),
+        "agency": bid.get("agency", ""),
+        "deadline": bid.get("deadline", ""),
+        "amount_label": bid.get("amount_label", ""),
+        "region_label": bid.get("region_label", ""),
+        "g2b_url": bid.get("g2b_url", ""),
+    }
+    return "&".join(f"{quote(str(k))}={quote(str(v))}" for k, v in params.items())
+
+
+def render_saved_bid_table(items: list, mode: str = "favorite") -> str:
+    if not items:
+        return """
+        <div class="empty">
+            저장된 공고가 없습니다.<br>
+            공고 목록에서 관심저장 또는 상세보기를 눌러보세요.
+        </div>
+        """
+    rows = []
+    for idx, bid in enumerate(items, start=1):
+        key = bid_key_from_summary(bid)
+        delete_button = ""
+        if mode == "favorite":
+            delete_button = f'<a class="link-btn danger" href="/bids/favorite-delete?bid_key={quote(key)}">삭제</a>'
+        rows.append(
+            f"""
+            <tr>
+                <td class="num">{idx}</td>
+                <td class="title">
+                    <div class="bid-name">{h(bid.get("bid_name"))}</div>
+                    <div class="small">공고번호: {h(bid.get("bid_no"))}</div>
+                </td>
+                <td>{h(bid.get("region_label"))}</td>
+                <td>{h(bid.get("amount_label"))}</td>
+                <td>{h(bid.get("agency"))}</td>
+                <td>{h(bid.get("deadline"))}</td>
+                <td>{h(bid.get("saved_at"))}</td>
+                <td>
+                    <a class="link-btn" href="{h(bid.get("g2b_url"))}" target="_blank" rel="noopener">원문 보기</a>
+                    {delete_button}
+                </td>
+            </tr>
+            """
+        )
+    return f"""
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>No</th>
+                    <th>공고명</th>
+                    <th>지역</th>
+                    <th>금액</th>
+                    <th>기관</th>
+                    <th>마감일</th>
+                    <th>저장/조회 시간</th>
+                    <th>관리</th>
+                </tr>
+            </thead>
+            <tbody>
+                {''.join(rows)}
+            </tbody>
+        </table>
+    </div>
+    """
+
+
+
 # =========================================================
 # HTML 함수
 # =========================================================
@@ -1585,9 +1733,9 @@ def render_bid_table(bids: list) -> str:
                 <td>{h(bid.get("agency"))}</td>
                 <td>{h(bid.get("deadline"))}</td>
                 <td>
-                    <a class="link-btn" href="{h(bid.get("g2b_url"))}" target="_blank" rel="noopener">
-                        원문 보기
-                    </a>
+                    <a class="link-btn" href="/bids/detail?{h(bid_summary_query_params(bid))}">상세보기</a>
+                    <a class="link-btn" href="/bids/favorite-add?{h(bid_summary_query_params(bid))}">관심저장</a>
+                    <a class="link-btn" href="{h(bid.get("g2b_url"))}" target="_blank" rel="noopener">원문 보기</a>
                 </td>
             </tr>
         """)
@@ -1948,7 +2096,7 @@ def health():
     return {
         "status": "ok",
         "service": "gongsa-bid",
-        "version": "profile-examples-not-saved-1.0.0",
+        "version": "favorite-recent-1.0.0",
         "has_DATA_GO_KR_SERVICE_KEY": bool(DATA_GO_KR_SERVICE_KEY),
     }
 
@@ -1967,6 +2115,8 @@ def routes():
             "/bids/songwon-test",
             "/bids/songwon-page",
             "/bids/my-page",
+            "/bids/favorites",
+            "/bids/recent",
             "/bids/songwon-page?region=전국",
             "/bids/songwon-page?region=경남",
         ]
@@ -1991,6 +2141,8 @@ def home():
             <a class="top-btn" href="/bids/songwon-page?region=전국">전국 공고 보기</a>
             <a class="top-btn" href="/bids/songwon-page?region=경남">경남 공고 보기</a>
             <a class="top-btn" href="/company/profile">회사 프로필 등록</a>
+            <a class="top-btn" href="/bids/favorites">관심 공고</a>
+            <a class="top-btn" href="/bids/recent">최근 본 공고</a>
             <a class="top-btn" href="/company/profile-data" target="_blank">프로필 JSON 확인</a>
         </div>
     </div>
@@ -2210,6 +2362,128 @@ def company_profile_save(
 @app.get("/company/profile-data")
 def company_profile_data():
     return JSONResponse(load_company_profile())
+
+
+
+@app.get("/bids/detail", response_class=HTMLResponse)
+def bid_detail_page(
+    bid_no: str = Query(""),
+    bid_ord: str = Query(""),
+    bid_name: str = Query(""),
+    agency: str = Query(""),
+    deadline: str = Query(""),
+    amount_label: str = Query(""),
+    region_label: str = Query(""),
+    g2b_url: str = Query(""),
+):
+    bid = make_bid_summary_from_query(bid_no, bid_ord, bid_name, agency, deadline, amount_label, region_label, g2b_url)
+    add_unique_bid(RECENT_FILE, bid, max_items=50)
+    body = f"""
+    <div class="card"><div class="summary">
+        <span class="badge">공고 상세보기</span>
+        <a class="top-btn" href="/bids/favorite-add?{h(bid_summary_query_params(bid))}">관심저장</a>
+        <a class="top-btn" href="/bids/recent">최근 본 공고</a>
+        <a class="top-btn" href="/bids/my-page">내 회사 맞춤 공고</a>
+        <a class="top-btn" href="/">첫 화면</a>
+    </div></div>
+    <div class="card">
+        <h2>{h(bid.get("bid_name"))}</h2>
+        <div class="profile-box">
+            <strong>공고번호:</strong> {h(bid.get("bid_no"))}<br>
+            <strong>기관:</strong> {h(bid.get("agency"))}<br>
+            <strong>지역:</strong> {h(bid.get("region_label"))}<br>
+            <strong>금액:</strong> {h(bid.get("amount_label"))}<br>
+            <strong>마감일:</strong> {h(bid.get("deadline"))}<br>
+            <strong>조회시간:</strong> {h(bid.get("saved_at"))}
+        </div>
+        <div class="menu">
+            <a class="top-btn" href="{h(bid.get("g2b_url"))}" target="_blank" rel="noopener">나라장터 원문 보기</a>
+            <a class="top-btn" href="/bids/favorite-add?{h(bid_summary_query_params(bid))}">관심 공고 저장</a>
+        </div>
+    </div>
+    """
+    return page_layout("공고 상세보기", "상세보기를 누른 공고는 최근 본 공고에 자동 저장됩니다", body)
+
+
+@app.get("/bids/favorite-add", response_class=HTMLResponse)
+def favorite_add(
+    bid_no: str = Query(""),
+    bid_ord: str = Query(""),
+    bid_name: str = Query(""),
+    agency: str = Query(""),
+    deadline: str = Query(""),
+    amount_label: str = Query(""),
+    region_label: str = Query(""),
+    g2b_url: str = Query(""),
+):
+    bid = make_bid_summary_from_query(bid_no, bid_ord, bid_name, agency, deadline, amount_label, region_label, g2b_url)
+    add_unique_bid(FAVORITES_FILE, bid, max_items=100)
+    body = f"""
+    <div class="card">
+        <h2>관심 공고 저장 완료</h2>
+        <p class="notice">관심 공고에 저장했습니다.</p>
+        <div class="profile-box">
+            <strong>공고명:</strong> {h(bid.get("bid_name"))}<br>
+            <strong>기관:</strong> {h(bid.get("agency"))}<br>
+            <strong>금액:</strong> {h(bid.get("amount_label"))}<br>
+            <strong>마감일:</strong> {h(bid.get("deadline"))}
+        </div>
+        <div class="menu">
+            <a class="top-btn" href="/bids/favorites">관심 공고 보기</a>
+            <a class="top-btn" href="/bids/my-page">내 회사 맞춤 공고</a>
+            <a class="top-btn" href="/">첫 화면</a>
+        </div>
+    </div>
+    """
+    return page_layout("관심 공고 저장 완료", "관심 공고가 저장되었습니다", body)
+
+
+@app.get("/bids/favorites", response_class=HTMLResponse)
+def favorite_list_page():
+    items = load_json_list(FAVORITES_FILE)
+    body = f"""
+    <div class="card"><div class="summary">
+        <span class="badge">관심 공고</span>
+        <span class="badge">저장 수: {h(len(items))}개</span>
+        <a class="top-btn" href="/bids/my-page">내 회사 맞춤 공고</a>
+        <a class="top-btn" href="/bids/songwon-page">전체 공고 보기</a>
+        <a class="top-btn" href="/">첫 화면</a>
+    </div></div>
+    <div class="card">{render_saved_bid_table(items, mode="favorite")}</div>
+    """
+    return page_layout("관심 공고", "저장한 관심 공고 목록입니다", body)
+
+
+@app.get("/bids/favorite-delete", response_class=HTMLResponse)
+def favorite_delete(bid_key: str = Query("")):
+    remove_bid_from_file(FAVORITES_FILE, bid_key)
+    body = """
+    <div class="card">
+        <h2>관심 공고 삭제 완료</h2>
+        <p class="notice">선택한 관심 공고를 삭제했습니다.</p>
+        <div class="menu">
+            <a class="top-btn" href="/bids/favorites">관심 공고로 돌아가기</a>
+            <a class="top-btn" href="/">첫 화면</a>
+        </div>
+    </div>
+    """
+    return page_layout("관심 공고 삭제 완료", "관심 공고가 삭제되었습니다", body)
+
+
+@app.get("/bids/recent", response_class=HTMLResponse)
+def recent_list_page():
+    items = load_json_list(RECENT_FILE)
+    body = f"""
+    <div class="card"><div class="summary">
+        <span class="badge">최근 본 공고</span>
+        <span class="badge">최근 조회 수: {h(len(items))}개</span>
+        <a class="top-btn" href="/bids/my-page">내 회사 맞춤 공고</a>
+        <a class="top-btn" href="/bids/songwon-page">전체 공고 보기</a>
+        <a class="top-btn" href="/">첫 화면</a>
+    </div></div>
+    <div class="card">{render_saved_bid_table(items, mode="recent")}</div>
+    """
+    return page_layout("최근 본 공고", "상세보기를 누른 공고가 자동으로 저장됩니다", body)
 
 
 @app.get("/bids/nara")
