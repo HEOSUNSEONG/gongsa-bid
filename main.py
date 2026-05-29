@@ -4,22 +4,28 @@ import re
 import html
 import json
 import requests
+import time
 from datetime import datetime, timedelta
 from urllib.parse import quote
 from typing import List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
-app = FastAPI(title="gongsa-bid", version="favorite-recent-1.0.0")
+app = FastAPI(title="gongsa-bid", version="strict-filter-fast-search-1.0.0")
 
 
 DATA_GO_KR_SERVICE_KEY = os.getenv("DATA_GO_KR_SERVICE_KEY", "").strip()
 G2B_CONSTRUCTION_API_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoCnstwk"
 PROFILE_FILE = "company_profile.json"
-FAVORITES_FILE = "favorite_bids.json"
-RECENT_FILE = "recent_bids.json"
 NATIONWIDE_AMOUNT_LIMIT = 10_000_000_000
+
+# 검색 속도 개선 설정
+# 같은 키워드 검색은 30분 동안 메모리에 저장해서 다시 API를 부르지 않습니다.
+BID_SEARCH_CACHE_TTL_SECONDS = 60 * 30
+BID_SEARCH_MAX_WORKERS = 6
+BID_SEARCH_CACHE = {}
 
 SONGWON_KEYWORDS = [
     "포장", "배수", "배수로", "상하수도", "관로",
@@ -390,10 +396,10 @@ SPECIALTY_CONSTRUCTION_LICENSE_OPTIONS = [
 
 LICENSE_KEYWORDS = {
     "토목공사업": ["토목", "도로", "하천", "교량", "상하수도", "농로", "구거"],
-    "건축공사업": ["건축", "신축", "증축", "리모델링", "보수공사"],
+    "건축공사업": ["건축공사", "건축 공사", "신축", "증축", "리모델링", "대수선"],
     "토목건축공사업": ["토목건축", "토건", "토목", "건축"],
     "산업·환경설비공사업": ["산업설비", "환경설비", "폐수", "처리장", "플랜트"],
-    "조경공사업": ["조경", "공원", "녹지", "식재"],
+    "조경공사업": ["조경공사", "조경 공사", "공원조성", "녹지공사", "식재공사"],
     "지반조성·포장공사업": ["지반조성", "포장", "아스콘", "아스팔트", "콘크리트포장", "보도포장", "토공", "보링", "그라우팅", "파일"],
     "실내건축공사업": ["실내건축", "인테리어", "내장", "수장"],
     "금속·창호·지붕·건축물조립공사업": ["금속", "창호", "지붕", "판넬", "건축물조립"],
@@ -539,6 +545,18 @@ PROFILE_EXCLUDE_RULES = {
         "profile_terms": ["건축공사업", "토목건축공사업", "건축공", "신축", "증축", "대수선", "리모델링", "실내건축"],
         "bid_terms": ["건축공사", "건축 공사", "신축", "증축", "대수선", "리모델링", "인테리어", "실내건축", "내장공사"],
     },
+    "도장·방수·석공": {
+        "profile_terms": ["도장·습식·방수·석공사업", "도장공사", "습식·방수공사", "방수공", "도장공", "석공사", "석공", "미장공", "타일공"],
+        "bid_terms": ["방수공사", "방수 공사", "도장공사", "도장 공사", "습식공사", "습식 공사", "석공사", "석공 공사", "미장공사", "타일공사", "도막방수", "우레탄방수", "옥상방수"],
+    },
+    "금속·창호·지붕": {
+        "profile_terms": ["금속·창호·지붕·건축물조립공사업", "금속공", "창호공", "지붕공", "판금공", "금속구조물공사", "창호공사", "지붕판금·건축물조립공사"],
+        "bid_terms": ["금속공사", "창호공사", "창호 공사", "지붕공사", "판금공사", "샷시", "새시", "문교체", "창문교체"],
+    },
+    "철거·비계": {
+        "profile_terms": ["구조물해체·비계공사업", "구조물해체공사", "철거공", "비계공"],
+        "bid_terms": ["철거공사", "철거 공사", "해체공사", "구조물해체", "비계공사", "비계 공사"],
+    },
     "통신": {
         "profile_terms": ["통신공", "정보통신", "CCTV"],
         "bid_terms": ["통신공사", "정보통신", "CCTV", "방송설비", "네트워크"],
@@ -553,7 +571,7 @@ PROFILE_EXCLUDE_RULES = {
     },
     "조경": {
         "profile_terms": ["조경공사업", "조경식재·시설물공사업", "조경공", "조경식재", "조경시설물", "공원시설", "잔디식재", "수목식재"],
-        "bid_terms": ["조경공사", "조경 식재", "수목", "잔디", "공원시설", "식재공사"],
+        "bid_terms": ["조경공사", "조경 공사", "조경식재", "조경시설", "수목", "잔디", "공원시설", "식재공사", "식재 공사"],
     },
 }
 
@@ -1062,6 +1080,75 @@ def fetch_nara_bids(keyword: str, page_no: int = 1, num_rows: int = 100, days_fo
         }
 
 
+
+def cached_fetch_nara_bids(keyword: str, page_no: int = 1, num_rows: int = 100, days_forward: int = 30) -> dict:
+    """
+    같은 키워드 검색을 30분 동안 메모리에 저장해서 검색 속도를 높입니다.
+    Render 무료 서버가 재시작되면 캐시는 사라지지만, 실행 중에는 반복 검색이 빨라집니다.
+    """
+    today_key = datetime.now().strftime("%Y%m%d")
+    cache_key = f"{today_key}|{keyword}|{page_no}|{num_rows}|{days_forward}"
+    now = time.time()
+
+    cached = BID_SEARCH_CACHE.get(cache_key)
+    if cached and now - cached.get("time", 0) < BID_SEARCH_CACHE_TTL_SECONDS:
+        return cached.get("data", {})
+
+    result = fetch_nara_bids(keyword, page_no, num_rows, days_forward)
+
+    if result.get("ok"):
+        BID_SEARCH_CACHE[cache_key] = {
+            "time": now,
+            "data": result,
+        }
+
+    return result
+
+
+def fetch_many_nara_bids(keywords: list, pages_per_keyword: int, num_rows: int, days_forward: int) -> list:
+    """
+    여러 키워드를 동시에 검색합니다.
+    기존에는 15개 키워드를 1개씩 순서대로 검색해서 느렸지만,
+    이제는 최대 6개씩 동시에 검색합니다.
+    """
+    jobs = []
+
+    for keyword in keywords:
+        for page_no in range(1, pages_per_keyword + 1):
+            jobs.append((keyword, page_no))
+
+    results = []
+
+    if not jobs:
+        return results
+
+    max_workers = min(BID_SEARCH_MAX_WORKERS, len(jobs))
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {
+            executor.submit(cached_fetch_nara_bids, keyword, page_no, num_rows, days_forward): (keyword, page_no)
+            for keyword, page_no in jobs
+        }
+
+        for future in as_completed(future_map):
+            keyword, page_no = future_map[future]
+            try:
+                result = future.result()
+            except Exception as e:
+                result = {
+                    "ok": False,
+                    "keyword": keyword,
+                    "page_no": page_no,
+                    "error": str(e),
+                    "items": [],
+                }
+
+            results.append((keyword, page_no, result))
+
+    return results
+
+
+
 def simplify_bid(item: dict, keyword: str = "") -> dict:
     deadline = get_deadline(item)
     amount = get_bid_amount(item)
@@ -1091,39 +1178,8 @@ def simplify_bid(item: dict, keyword: str = "") -> dict:
     }
 
 
-def search_bids_by_keywords(
-    keywords: list,
-    region: str = "전체",
-    exclude_closed: bool = True,
-    days_forward: int = 30,
-    pages_per_keyword: int = 1,
-    num_rows: int = 100,
-) -> dict:
-    all_items = []
-    errors = []
 
-    for keyword in keywords:
-        for page_no in range(1, pages_per_keyword + 1):
-            result = fetch_nara_bids(keyword, page_no, num_rows, days_forward)
-
-            if not result.get("ok"):
-                errors.append({
-                    "keyword": keyword,
-                    "page_no": page_no,
-                    "error": result.get("error"),
-                    "preview": result.get("preview", ""),
-                })
-                continue
-
-            for item in result.get("items", []):
-                if exclude_closed and is_closed(item):
-                    continue
-
-                if not match_region(item, region):
-                    continue
-
-                all_items.append(simplify_bid(item, keyword=keyword))
-
+def dedupe_and_sort_bids(all_items: list) -> list:
     deduped = []
     seen = set()
 
@@ -1148,6 +1204,47 @@ def search_bids_by_keywords(
         return dt
 
     deduped.sort(key=sort_key)
+    return deduped
+
+
+def search_bids_by_keywords(
+    keywords: list,
+    region: str = "전체",
+    exclude_closed: bool = True,
+    days_forward: int = 30,
+    pages_per_keyword: int = 1,
+    num_rows: int = 100,
+) -> dict:
+    all_items = []
+    errors = []
+
+    results = fetch_many_nara_bids(
+        keywords=keywords,
+        pages_per_keyword=pages_per_keyword,
+        num_rows=num_rows,
+        days_forward=days_forward,
+    )
+
+    for keyword, page_no, result in results:
+        if not result.get("ok"):
+            errors.append({
+                "keyword": keyword,
+                "page_no": page_no,
+                "error": result.get("error"),
+                "preview": result.get("preview", ""),
+            })
+            continue
+
+        for item in result.get("items", []):
+            if exclude_closed and is_closed(item):
+                continue
+
+            if not match_region(item, region):
+                continue
+
+            all_items.append(simplify_bid(item, keyword=keyword))
+
+    deduped = dedupe_and_sort_bids(all_items)
 
     return {
         "status": "ok",
@@ -1157,6 +1254,7 @@ def search_bids_by_keywords(
         "count": len(deduped),
         "errors": errors,
         "bids": deduped,
+        "speed_note": "동시검색 + 30분 캐시 적용",
     }
 
 
@@ -1332,64 +1430,47 @@ def search_bids_for_profile(
     all_items = []
     errors = []
 
-    for keyword in keywords:
-        for page_no in range(1, pages_per_keyword + 1):
-            result = fetch_nara_bids(keyword, page_no, num_rows, days_forward)
+    results = fetch_many_nara_bids(
+        keywords=keywords,
+        pages_per_keyword=pages_per_keyword,
+        num_rows=num_rows,
+        days_forward=days_forward,
+    )
 
-            if not result.get("ok"):
-                errors.append({
-                    "keyword": keyword,
-                    "page_no": page_no,
-                    "error": result.get("error"),
-                    "preview": result.get("preview", ""),
-                })
-                continue
-
-            for item in result.get("items", []):
-                if exclude_closed and is_closed(item):
-                    continue
-
-                if not match_profile_regions(item, profile_regions):
-                    continue
-
-                if not match_profile_specialty(item, profile):
-                    continue
-
-                if not match_profile_siping(item, profile):
-                    continue
-
-                bid = simplify_bid(item, keyword=keyword)
-                matched_regions = get_profile_matched_regions(item, profile_regions)
-                bid["profile_match_region_label"] = ", ".join(matched_regions) if matched_regions else "-"
-                specialty_reason = get_profile_specialty_reason(item, profile)
-                siping_reason = get_profile_siping_reason(item, profile)
-                bid["profile_match_reason"] = f"{specialty_reason} / {siping_reason}" if specialty_reason != "-" else siping_reason
-                all_items.append(bid)
-
-    deduped = []
-    seen = set()
-
-    for bid in all_items:
-        key = (
-            bid.get("bid_no") or "",
-            bid.get("bid_ord") or "",
-            bid.get("bid_name") or "",
-            bid.get("deadline") or "",
-        )
-
-        if key in seen:
+    for keyword, page_no, result in results:
+        if not result.get("ok"):
+            errors.append({
+                "keyword": keyword,
+                "page_no": page_no,
+                "error": result.get("error"),
+                "preview": result.get("preview", ""),
+            })
             continue
 
-        seen.add(key)
-        deduped.append(bid)
+        for item in result.get("items", []):
+            if exclude_closed and is_closed(item):
+                continue
 
-    def sort_key(bid):
-        dt = parse_date(bid.get("deadline"))
-        if not dt:
-            return datetime.max
-        return dt
+            if not match_profile_regions(item, profile_regions):
+                continue
 
-    deduped.sort(key=sort_key)
+            if not match_profile_specialty(item, profile):
+                continue
+
+            if not match_profile_siping(item, profile):
+                continue
+
+            bid = simplify_bid(item, keyword=keyword)
+            matched_regions = get_profile_matched_regions(item, profile_regions)
+            bid["profile_match_region_label"] = ", ".join(matched_regions) if matched_regions else "-"
+
+            specialty_reason = get_profile_specialty_reason(item, profile)
+            siping_reason = get_profile_siping_reason(item, profile)
+            bid["profile_match_reason"] = f"{specialty_reason} / {siping_reason}" if specialty_reason != "-" else siping_reason
+
+            all_items.append(bid)
+
+    deduped = dedupe_and_sort_bids(all_items)
 
     return {
         "status": "ok",
@@ -1401,6 +1482,7 @@ def search_bids_for_profile(
         "count": len(deduped),
         "errors": errors,
         "bids": deduped,
+        "speed_note": "동시검색 + 30분 캐시 적용",
     }
 
 
@@ -1465,152 +1547,6 @@ def split_keywords(keyword_text: str) -> list:
             keywords.append(text)
 
     return keywords or SONGWON_KEYWORDS
-
-
-
-# =========================================================
-# 관심 공고 / 최근 본 공고 저장
-# =========================================================
-
-def load_json_list(file_path: str) -> list:
-    if not os.path.exists(file_path):
-        return []
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            return data
-    except Exception:
-        pass
-    return []
-
-
-def save_json_list(file_path: str, items: list) -> None:
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(items, f, ensure_ascii=False, indent=2)
-
-
-def bid_key_from_summary(bid: dict) -> str:
-    bid_no = str(bid.get("bid_no") or "").strip()
-    bid_ord = str(bid.get("bid_ord") or "").strip()
-    bid_name = str(bid.get("bid_name") or "").strip()
-    deadline = str(bid.get("deadline") or "").strip()
-    if bid_no:
-        return f"{bid_no}-{bid_ord}"
-    return f"{bid_name}-{deadline}"
-
-
-def make_bid_summary_from_query(
-    bid_no: str = "",
-    bid_ord: str = "",
-    bid_name: str = "",
-    agency: str = "",
-    deadline: str = "",
-    amount_label: str = "",
-    region_label: str = "",
-    g2b_url: str = "",
-) -> dict:
-    return {
-        "bid_no": bid_no.strip(),
-        "bid_ord": bid_ord.strip(),
-        "bid_name": bid_name.strip(),
-        "agency": agency.strip(),
-        "deadline": deadline.strip(),
-        "amount_label": amount_label.strip(),
-        "region_label": region_label.strip(),
-        "g2b_url": g2b_url.strip() or "https://www.g2b.go.kr",
-        "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-
-
-def add_unique_bid(file_path: str, bid: dict, max_items: int = 50) -> None:
-    items = load_json_list(file_path)
-    new_key = bid_key_from_summary(bid)
-    filtered = []
-    for item in items:
-        if bid_key_from_summary(item) != new_key:
-            filtered.append(item)
-    filtered.insert(0, bid)
-    filtered = filtered[:max_items]
-    save_json_list(file_path, filtered)
-
-
-def remove_bid_from_file(file_path: str, bid_key: str) -> None:
-    items = load_json_list(file_path)
-    filtered = [item for item in items if bid_key_from_summary(item) != bid_key]
-    save_json_list(file_path, filtered)
-
-
-def bid_summary_query_params(bid: dict) -> str:
-    params = {
-        "bid_no": bid.get("bid_no", ""),
-        "bid_ord": bid.get("bid_ord", ""),
-        "bid_name": bid.get("bid_name", ""),
-        "agency": bid.get("agency", ""),
-        "deadline": bid.get("deadline", ""),
-        "amount_label": bid.get("amount_label", ""),
-        "region_label": bid.get("region_label", ""),
-        "g2b_url": bid.get("g2b_url", ""),
-    }
-    return "&".join(f"{quote(str(k))}={quote(str(v))}" for k, v in params.items())
-
-
-def render_saved_bid_table(items: list, mode: str = "favorite") -> str:
-    if not items:
-        return """
-        <div class="empty">
-            저장된 공고가 없습니다.<br>
-            공고 목록에서 관심저장 또는 상세보기를 눌러보세요.
-        </div>
-        """
-    rows = []
-    for idx, bid in enumerate(items, start=1):
-        key = bid_key_from_summary(bid)
-        delete_button = ""
-        if mode == "favorite":
-            delete_button = f'<a class="link-btn danger" href="/bids/favorite-delete?bid_key={quote(key)}">삭제</a>'
-        rows.append(
-            f"""
-            <tr>
-                <td class="num">{idx}</td>
-                <td class="title">
-                    <div class="bid-name">{h(bid.get("bid_name"))}</div>
-                    <div class="small">공고번호: {h(bid.get("bid_no"))}</div>
-                </td>
-                <td>{h(bid.get("region_label"))}</td>
-                <td>{h(bid.get("amount_label"))}</td>
-                <td>{h(bid.get("agency"))}</td>
-                <td>{h(bid.get("deadline"))}</td>
-                <td>{h(bid.get("saved_at"))}</td>
-                <td>
-                    <a class="link-btn" href="{h(bid.get("g2b_url"))}" target="_blank" rel="noopener">원문 보기</a>
-                    {delete_button}
-                </td>
-            </tr>
-            """
-        )
-    return f"""
-    <div class="table-wrap">
-        <table>
-            <thead>
-                <tr>
-                    <th>No</th>
-                    <th>공고명</th>
-                    <th>지역</th>
-                    <th>금액</th>
-                    <th>기관</th>
-                    <th>마감일</th>
-                    <th>저장/조회 시간</th>
-                    <th>관리</th>
-                </tr>
-            </thead>
-            <tbody>
-                {''.join(rows)}
-            </tbody>
-        </table>
-    </div>
-    """
-
 
 
 # =========================================================
@@ -1733,9 +1669,9 @@ def render_bid_table(bids: list) -> str:
                 <td>{h(bid.get("agency"))}</td>
                 <td>{h(bid.get("deadline"))}</td>
                 <td>
-                    <a class="link-btn" href="/bids/detail?{h(bid_summary_query_params(bid))}">상세보기</a>
-                    <a class="link-btn" href="/bids/favorite-add?{h(bid_summary_query_params(bid))}">관심저장</a>
-                    <a class="link-btn" href="{h(bid.get("g2b_url"))}" target="_blank" rel="noopener">원문 보기</a>
+                    <a class="link-btn" href="{h(bid.get("g2b_url"))}" target="_blank" rel="noopener">
+                        원문 보기
+                    </a>
                 </td>
             </tr>
         """)
@@ -2096,7 +2032,7 @@ def health():
     return {
         "status": "ok",
         "service": "gongsa-bid",
-        "version": "favorite-recent-1.0.0",
+        "version": "strict-filter-fast-search-1.0.0",
         "has_DATA_GO_KR_SERVICE_KEY": bool(DATA_GO_KR_SERVICE_KEY),
     }
 
@@ -2115,8 +2051,6 @@ def routes():
             "/bids/songwon-test",
             "/bids/songwon-page",
             "/bids/my-page",
-            "/bids/favorites",
-            "/bids/recent",
             "/bids/songwon-page?region=전국",
             "/bids/songwon-page?region=경남",
         ]
@@ -2141,8 +2075,6 @@ def home():
             <a class="top-btn" href="/bids/songwon-page?region=전국">전국 공고 보기</a>
             <a class="top-btn" href="/bids/songwon-page?region=경남">경남 공고 보기</a>
             <a class="top-btn" href="/company/profile">회사 프로필 등록</a>
-            <a class="top-btn" href="/bids/favorites">관심 공고</a>
-            <a class="top-btn" href="/bids/recent">최근 본 공고</a>
             <a class="top-btn" href="/company/profile-data" target="_blank">프로필 JSON 확인</a>
         </div>
     </div>
@@ -2364,128 +2296,6 @@ def company_profile_data():
     return JSONResponse(load_company_profile())
 
 
-
-@app.get("/bids/detail", response_class=HTMLResponse)
-def bid_detail_page(
-    bid_no: str = Query(""),
-    bid_ord: str = Query(""),
-    bid_name: str = Query(""),
-    agency: str = Query(""),
-    deadline: str = Query(""),
-    amount_label: str = Query(""),
-    region_label: str = Query(""),
-    g2b_url: str = Query(""),
-):
-    bid = make_bid_summary_from_query(bid_no, bid_ord, bid_name, agency, deadline, amount_label, region_label, g2b_url)
-    add_unique_bid(RECENT_FILE, bid, max_items=50)
-    body = f"""
-    <div class="card"><div class="summary">
-        <span class="badge">공고 상세보기</span>
-        <a class="top-btn" href="/bids/favorite-add?{h(bid_summary_query_params(bid))}">관심저장</a>
-        <a class="top-btn" href="/bids/recent">최근 본 공고</a>
-        <a class="top-btn" href="/bids/my-page">내 회사 맞춤 공고</a>
-        <a class="top-btn" href="/">첫 화면</a>
-    </div></div>
-    <div class="card">
-        <h2>{h(bid.get("bid_name"))}</h2>
-        <div class="profile-box">
-            <strong>공고번호:</strong> {h(bid.get("bid_no"))}<br>
-            <strong>기관:</strong> {h(bid.get("agency"))}<br>
-            <strong>지역:</strong> {h(bid.get("region_label"))}<br>
-            <strong>금액:</strong> {h(bid.get("amount_label"))}<br>
-            <strong>마감일:</strong> {h(bid.get("deadline"))}<br>
-            <strong>조회시간:</strong> {h(bid.get("saved_at"))}
-        </div>
-        <div class="menu">
-            <a class="top-btn" href="{h(bid.get("g2b_url"))}" target="_blank" rel="noopener">나라장터 원문 보기</a>
-            <a class="top-btn" href="/bids/favorite-add?{h(bid_summary_query_params(bid))}">관심 공고 저장</a>
-        </div>
-    </div>
-    """
-    return page_layout("공고 상세보기", "상세보기를 누른 공고는 최근 본 공고에 자동 저장됩니다", body)
-
-
-@app.get("/bids/favorite-add", response_class=HTMLResponse)
-def favorite_add(
-    bid_no: str = Query(""),
-    bid_ord: str = Query(""),
-    bid_name: str = Query(""),
-    agency: str = Query(""),
-    deadline: str = Query(""),
-    amount_label: str = Query(""),
-    region_label: str = Query(""),
-    g2b_url: str = Query(""),
-):
-    bid = make_bid_summary_from_query(bid_no, bid_ord, bid_name, agency, deadline, amount_label, region_label, g2b_url)
-    add_unique_bid(FAVORITES_FILE, bid, max_items=100)
-    body = f"""
-    <div class="card">
-        <h2>관심 공고 저장 완료</h2>
-        <p class="notice">관심 공고에 저장했습니다.</p>
-        <div class="profile-box">
-            <strong>공고명:</strong> {h(bid.get("bid_name"))}<br>
-            <strong>기관:</strong> {h(bid.get("agency"))}<br>
-            <strong>금액:</strong> {h(bid.get("amount_label"))}<br>
-            <strong>마감일:</strong> {h(bid.get("deadline"))}
-        </div>
-        <div class="menu">
-            <a class="top-btn" href="/bids/favorites">관심 공고 보기</a>
-            <a class="top-btn" href="/bids/my-page">내 회사 맞춤 공고</a>
-            <a class="top-btn" href="/">첫 화면</a>
-        </div>
-    </div>
-    """
-    return page_layout("관심 공고 저장 완료", "관심 공고가 저장되었습니다", body)
-
-
-@app.get("/bids/favorites", response_class=HTMLResponse)
-def favorite_list_page():
-    items = load_json_list(FAVORITES_FILE)
-    body = f"""
-    <div class="card"><div class="summary">
-        <span class="badge">관심 공고</span>
-        <span class="badge">저장 수: {h(len(items))}개</span>
-        <a class="top-btn" href="/bids/my-page">내 회사 맞춤 공고</a>
-        <a class="top-btn" href="/bids/songwon-page">전체 공고 보기</a>
-        <a class="top-btn" href="/">첫 화면</a>
-    </div></div>
-    <div class="card">{render_saved_bid_table(items, mode="favorite")}</div>
-    """
-    return page_layout("관심 공고", "저장한 관심 공고 목록입니다", body)
-
-
-@app.get("/bids/favorite-delete", response_class=HTMLResponse)
-def favorite_delete(bid_key: str = Query("")):
-    remove_bid_from_file(FAVORITES_FILE, bid_key)
-    body = """
-    <div class="card">
-        <h2>관심 공고 삭제 완료</h2>
-        <p class="notice">선택한 관심 공고를 삭제했습니다.</p>
-        <div class="menu">
-            <a class="top-btn" href="/bids/favorites">관심 공고로 돌아가기</a>
-            <a class="top-btn" href="/">첫 화면</a>
-        </div>
-    </div>
-    """
-    return page_layout("관심 공고 삭제 완료", "관심 공고가 삭제되었습니다", body)
-
-
-@app.get("/bids/recent", response_class=HTMLResponse)
-def recent_list_page():
-    items = load_json_list(RECENT_FILE)
-    body = f"""
-    <div class="card"><div class="summary">
-        <span class="badge">최근 본 공고</span>
-        <span class="badge">최근 조회 수: {h(len(items))}개</span>
-        <a class="top-btn" href="/bids/my-page">내 회사 맞춤 공고</a>
-        <a class="top-btn" href="/bids/songwon-page">전체 공고 보기</a>
-        <a class="top-btn" href="/">첫 화면</a>
-    </div></div>
-    <div class="card">{render_saved_bid_table(items, mode="recent")}</div>
-    """
-    return page_layout("최근 본 공고", "상세보기를 누른 공고가 자동으로 저장됩니다", body)
-
-
 @app.get("/bids/nara")
 def nara_json(
     keyword: str = Query("포장", description="검색 키워드"),
@@ -2587,6 +2397,7 @@ def my_bids_page(
             <span class="badge">입찰 가능지역: {h(selected_regions)}</span>
             <span class="badge">공고 수: {h(result.get("count"))}개</span>
             <span class="badge">마감 지난 공고 제외</span>
+            <span class="badge">동시검색 + 30분 캐시</span>
             <a class="top-btn" href="/">첫 화면</a>
             <a class="top-btn" href="/company/profile">회사 프로필 수정</a>
             <a class="top-btn" href="/bids/songwon-page">전체 공고 보기</a>
@@ -2597,8 +2408,8 @@ def my_bids_page(
         <h3>맞춤 공고 기준</h3>
         <p class="notice">
             회사 프로필의 <strong>입찰 가능지역 + 보유 면허 + 주력 공종 + 자재납품 품목 + 시공능력평가액</strong>을 기준으로 공고를 걸러봅니다.<br>
-            전기공사, 건축공사처럼 회사 프로필에 없는 면허/공종은 내 회사 맞춤 공고에서 제외합니다.<br>
-            시공능력평가액이 입력되어 있으면 공고 금액이 시평액보다 큰 공고는 제외합니다.
+            전기공사, 건축공사, 방수공사, 도장공사, 조경공사처럼 회사 프로필에 없는 면허/공종은 내 회사 맞춤 공고에서 제외합니다.<br>
+            시공능력평가액이 입력되어 있으면 공고 금액이 시평액보다 큰 공고는 제외합니다. 검색은 동시검색과 30분 캐시를 적용했습니다.
         </p>
 
         <div class="profile-box">
